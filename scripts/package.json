@@ -1,0 +1,8 @@
+{
+  "name": "evaraflow-scripts",
+  "description": "One-off local admin tooling, run by hand against the Firebase Admin SDK. Never deployed.",
+  "private": true,
+  "dependencies": {
+    "firebase-admin": "^12.6.0"
+  }
+}

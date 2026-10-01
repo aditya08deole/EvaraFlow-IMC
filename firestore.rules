@@ -1,0 +1,98 @@
+rules_version = '2';
+
+// EvaraFlow Firestore Security Rules
+// Enforces TR-11 (org-scoping) and role-based access at the database layer,
+// not just in application code. See the Firebase backend plan (session
+// artifact, 1 Oct 2026) §05 for the full design and §06 for how secrets
+// (MQTT passwords, webhook shared secrets) are deliberately kept out of
+// Firestore entirely — none of that lives here.
+//
+// Writes to devices/readings/images/alerts are expected to come from the
+// Admin SDK (Cloud Functions / Cloud Run), which bypasses these rules.
+// The only client-side write path is an Administrator editing a device
+// record from the Add/Edit Device dialog.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function orgId() {
+      return request.auth.token.org_id;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function isAdmin() {
+      return role() == 'administrator';
+    }
+
+    function isOperatorOrAbove() {
+      return role() == 'administrator' || role() == 'operator';
+    }
+
+    // --- Organization-scoped data: devices, readings, images, alerts ---
+    // Every read requires the caller's org_id claim to match the path.
+    // TR-11: queries are scoped by organization from the authenticated
+    // session, enforced here rather than trusted to application code.
+    match /organizations/{org}/{document=**} {
+      allow read: if signedIn() && orgId() == org;
+    }
+
+    // Device records: Administrators can create/edit; Operators can edit
+    // labels only (enforced more precisely once the real field list is
+    // final — kept permissive-but-role-gated for now rather than guessing
+    // field-level rules ahead of the real Add/Edit Device form's fields).
+    match /organizations/{org}/devices/{deviceId} {
+      allow write: if signedIn() && orgId() == org && isAdmin();
+    }
+
+    // Alerts: Operators and Administrators can acknowledge/resolve.
+    match /organizations/{org}/alerts/{alertId} {
+      allow update: if signedIn() && orgId() == org && isOperatorOrAbove();
+      allow create, delete: if false; // Admin SDK only — alert rules evaluate server-side
+    }
+
+    // Readings and images: never written by a client, only ingestion
+    // functions via the Admin SDK.
+    match /organizations/{org}/devices/{deviceId}/readings_recent/{id} {
+      allow write: if false;
+    }
+    match /organizations/{org}/devices/{deviceId}/readings_hourly/{id} {
+      allow write: if false;
+    }
+    match /organizations/{org}/devices/{deviceId}/readings_daily/{id} {
+      allow write: if false;
+    }
+    match /organizations/{org}/images/{imageId} {
+      allow write: if false;
+    }
+
+    // --- Platform-wide, not org-scoped ---
+
+    // Dead letters: Administrator-read-only, across all orgs they can see
+    // (TR-11 still applies at query time via a where-clause the client
+    // issues — the rule itself just gates read access to admins).
+    match /deadLetters/{doc} {
+      allow read: if signedIn() && isAdmin();
+      allow write: if false;
+    }
+
+    // User profiles: a user can read their own; Administrators can read
+    // any profile within their own org (enforced via a query filter, not
+    // expressible here without a Firestore lookup per request).
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false; // profile fields set via a Cloud Function, not directly
+    }
+
+    // Default deny — anything not explicitly matched above is inaccessible.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

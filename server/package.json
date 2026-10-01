@@ -1,0 +1,23 @@
+{
+  "name": "evaraflow-server",
+  "description": "EvaraFlow backend — MQTT telemetry and Google Drive image ingestion. Deployed on Railway as a standalone Node/Express service; Firestore/Storage remain on Firebase, reached via a service-account key (see README.md in this directory).",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "firebase-admin": "^12.6.0",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.3"
+  }
+}
