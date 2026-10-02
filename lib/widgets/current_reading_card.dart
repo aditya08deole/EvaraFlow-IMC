@@ -130,21 +130,35 @@ class CurrentReadingCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
 
-                // Metric 2: Meter Reading
+                // Metric 2: Meter Reading. For a totalizer device this is
+                // the device's own cumulative counter (reading.totalL) —
+                // the actual number on the meter right now. For integrated
+                // flow devices there is no single running counter on the
+                // device itself, so this shows today's consumption computed
+                // by integrating flow over time instead.
                 Expanded(
-                  child: AnimatedMetricTile(
-                    label: 'METER READING',
-                    numericValue: todaysConsumption,
-                    displayString: todaysConsumption.toStringAsFixed(1),
-                    unit: 'L',
-                    icon: Icons.bubble_chart_rounded,
-                    accentColor: AppColors.liveTeal,
-                    subtitle:
-                        device?.consumptionMethod ==
-                            ConsumptionMethod.integratedFlow
-                        ? '(Integrated)'
-                        : '(Totalizer)',
-                  ),
+                  child:
+                      device?.consumptionMethod ==
+                          ConsumptionMethod.integratedFlow
+                      ? AnimatedMetricTile(
+                          label: 'METER READING',
+                          numericValue: todaysConsumption,
+                          displayString: todaysConsumption.toStringAsFixed(1),
+                          unit: 'L',
+                          icon: Icons.bubble_chart_rounded,
+                          accentColor: AppColors.liveTeal,
+                          subtitle: '(Integrated, today)',
+                        )
+                      : AnimatedMetricTile(
+                          label: 'METER READING',
+                          numericValue: reading!.totalL ?? 0.0,
+                          displayString:
+                              reading!.totalL?.toStringAsFixed(1) ?? '—',
+                          unit: 'L',
+                          icon: Icons.bubble_chart_rounded,
+                          accentColor: AppColors.liveTeal,
+                          subtitle: '(Totalizer)',
+                        ),
                 ),
                 const SizedBox(width: 12),
 

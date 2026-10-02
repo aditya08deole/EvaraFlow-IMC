@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/device.dart';
 import '../models/reading.dart';
@@ -10,7 +10,7 @@ class DeviceProvider with ChangeNotifier {
   late final ApiService _apiService;
 
   List<Device> _devices = [];
-  final List<String> _recentDeviceIds = ['EF-001', 'EF-002'];
+  final List<String> _recentDeviceIds = [];
 
   String? _selectedDeviceId;
   Device? _selectedDevice;
@@ -30,8 +30,6 @@ class DeviceProvider with ChangeNotifier {
   String _selectedRange = 'Today';
   int _tablePage = 1;
   final int _pageSize = 10;
-
-  Timer? _liveTelemetryTimer;
 
   // Getters
   List<Device> get devices => _devices;
@@ -98,10 +96,8 @@ class DeviceProvider with ChangeNotifier {
     }
   }
 
-  final bool enableLiveSimulation;
-
-  DeviceProvider({this.enableLiveSimulation = true, ApiService? apiService})
-    : _apiService = apiService ?? ApiService(useMockFixtures: true) {
+  DeviceProvider({ApiService? apiService})
+    : _apiService = apiService ?? ApiService() {
     init();
   }
 
@@ -174,9 +170,6 @@ class DeviceProvider with ChangeNotifier {
 
     notifyListeners();
 
-    // Restart live stream timer for selected device
-    _startLiveStreamSimulation(deviceId);
-
     // Load data for the new device with device ID guard
     _loadDeviceDashboardData(deviceId);
   }
@@ -239,38 +232,6 @@ class DeviceProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // FR-C2: Live Telemetry update simulation (EMQX MQTT live push)
-  void _startLiveStreamSimulation(String deviceId) {
-    _liveTelemetryTimer?.cancel();
-    if (!enableLiveSimulation) return;
-    _liveTelemetryTimer = Timer.periodic(const Duration(seconds: 12), (timer) {
-      if (_selectedDeviceId != deviceId || _isDashboardLoading) return;
-
-      if (_selectedDevice?.status == DeviceStatus.online) {
-        final now = DateTime.now();
-        final double newFlow = (12.0 + (now.second % 7) * 1.5);
-        final double currentTotal =
-            (_latestReading?.totalL ?? 4820.0) + (newFlow * 0.2);
-
-        final newReading = Reading(
-          deviceId: deviceId,
-          deviceTs: now,
-          receivedAt: now,
-          flowLpm: double.parse(newFlow.toStringAsFixed(1)),
-          totalL: double.parse(currentTotal.toStringAsFixed(1)),
-          sensorStatus: 'ok',
-          firmwareVersion: _selectedDevice?.firmwareVersion ?? '1.4.2',
-        );
-
-        _latestReading = newReading;
-        _historicalReadings.add(newReading);
-        _selectedDevice = _selectedDevice?.copyWith(lastSeenAt: now);
-
-        notifyListeners();
-      }
-    });
-  }
-
   void updateDevice(Device updated) {
     final idx = _devices.indexWhere((d) => d.deviceId == updated.deviceId);
     if (idx != -1) {
@@ -293,15 +254,9 @@ class DeviceProvider with ChangeNotifier {
     if (idx != -1) {
       _alerts[idx] = _alerts[idx].copyWith(
         status: AlertStatus.acknowledged,
-        acknowledgedBy: 'admin@evaratech.com',
+        acknowledgedBy: FirebaseAuth.instance.currentUser?.email ?? 'unknown',
       );
       notifyListeners();
     }
-  }
-
-  @override
-  void dispose() {
-    _liveTelemetryTimer?.cancel();
-    super.dispose();
   }
 }

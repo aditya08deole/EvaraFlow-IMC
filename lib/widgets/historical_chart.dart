@@ -189,6 +189,21 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
                 padding: const EdgeInsets.only(right: 10, top: 8),
                 child: LineChart(
                   LineChartData(
+                    // fl_chart auto-computes axis bounds from the data when
+                    // minY/maxY/minX/maxX aren't given — with only one or
+                    // two readings (common right after a device's first
+                    // real telemetry, or a device with sparse data), that
+                    // auto-computed Y-range can collapse to zero width,
+                    // which degenerates the chart into rendering nothing
+                    // visible instead of a single dot. Bounds are set
+                    // explicitly below with padding to avoid that.
+                    minX: 0,
+                    maxX: (widget.readings.length - 1).toDouble().clamp(
+                      1.0,
+                      double.infinity,
+                    ),
+                    minY: _axisBounds(isFlow).$1,
+                    maxY: _axisBounds(isFlow).$2,
                     gridData: FlGridData(
                       show: true,
                       drawVerticalLine: false,
@@ -329,6 +344,20 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
         ],
       ),
     );
+  }
+
+  (double, double) _axisBounds(bool isFlow) {
+    final values = widget.readings
+        .map((r) => isFlow ? r.flowLpm : (r.totalL ?? (r.flowLpm * 15.0)))
+        .toList();
+    final rawMin = values.reduce((a, b) => a < b ? a : b);
+    final rawMax = values.reduce((a, b) => a > b ? a : b);
+    final span = rawMax - rawMin;
+    // A flat line (including a single point, where span is always 0) needs
+    // a minimum padding derived from the value's own magnitude rather than
+    // the span, or the chart still collapses to a zero-height plot area.
+    final padding = span > 0 ? span * 0.15 : (rawMax.abs() * 0.1).clamp(1.0, double.infinity);
+    return (rawMin - padding, rawMax + padding);
   }
 
   Widget _buildMetricTab({

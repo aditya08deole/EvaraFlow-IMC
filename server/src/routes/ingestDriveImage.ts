@@ -17,9 +17,9 @@ import type { Request, Response } from "express";
 import { deadLetter, findDeviceByNodeId, imageExists, insertImage } from "../db";
 import { driveImageUrls } from "../drive";
 
-const FILENAME_RE = /^([A-Za-z0-9-]+)_(\d{8})_(\d{6})\.jpg$/;
+export const FILENAME_RE = /^([A-Za-z0-9-]+)_(\d{8})_(\d{6})\.jpg$/;
 
-function parseCapturedAt(dateStr: string, timeStr: string): string | null {
+export function parseCapturedAt(dateStr: string, timeStr: string): string | null {
   const y = dateStr.slice(0, 4);
   const mo = dateStr.slice(4, 6);
   const d = dateStr.slice(6, 8);
