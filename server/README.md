@@ -3,28 +3,35 @@
 Two HTTP webhook endpoints — `ingestTelemetry` (MQTT via EMQX Rule Engine)
 and `ingestDriveImage` (Google Drive via Apps Script) — that used to be
 Firebase Cloud Functions and now run as a plain Express app so they can
-deploy on Railway instead. Firestore, Storage, and Security Rules stay on
-Firebase (`evaraflow-dash`); this service only holds the compute, reached
-through a service-account key since Railway has no Google ADC.
+deploy on Railway instead. Firestore and Security Rules stay on Firebase
+(`evaraflow-dash`); this service only holds the compute, reached through a
+service-account key since Railway has no Google ADC.
+
+Demo scope (max ~2 devices): images are never downloaded or cached by this
+backend. `drive.ts` just builds a direct `lh3.googleusercontent.com` URL
+from the Drive file id, and the dashboard loads that URL straight from
+Drive. No Firebase Storage bucket is used.
 
 ## One-time setup
 
 1. **Get a service-account key.** Firebase Console → Project Settings →
    Service Accounts → *Generate new private key*. This downloads a JSON
-   file — keep it off git and out of chat entirely.
+   file — keep it off git and out of chat entirely. (Firestore access only
+   — this key is never used for Drive or Storage.)
 2. **Base64-encode it** so it survives Railway's variable editor intact:
    - Windows (PowerShell): `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json")) | Set-Clipboard`
    - macOS/Linux: `base64 -w0 key.json | pbcopy` (or `xclip`)
-3. **Share the Drive folder.** Open the Drive folder devices upload
-   images into → Share → paste the service account's `client_email` →
-   Viewer access.
+3. **Share the Drive folder "Anyone with the link" (Viewer).** Open the
+   Drive folder devices upload images into → Share → General access →
+   "Anyone with the link". This is required for the
+   `lh3.googleusercontent.com` image URLs to load for anyone viewing the
+   dashboard — no service-account sharing needed.
 4. **Create the Railway project**: railway.app → New Project → either
    "Deploy from GitHub repo" (point it at this repo, root directory
    `server/`) or `railway init` via the CLI from inside `server/`.
 5. **Set environment variables** in the Railway service's Variables tab
    (never in a committed file):
    - `FIREBASE_SERVICE_ACCOUNT_BASE64` — from step 2
-   - `FIREBASE_STORAGE_BUCKET` — `evaraflow-dash.firebasestorage.app`
    - `EMQX_WEBHOOK_SECRET` — `openssl rand -hex 32`
    - `DRIVE_WEBHOOK_SECRET` — `openssl rand -hex 32`
    - Railway injects `PORT` itself; don't set it.
@@ -73,6 +80,11 @@ node dist/index.js      # separate terminal, after a build exists
 - No Drive reconciliation poll — if the Apps Script POST to
   `/ingest/drive-image` is ever lost, nothing currently re-discovers that
   file.
+- No Storage caching (demo-scope decision) — images are served straight
+  from Drive via a `lh3.googleusercontent.com` URL built from the file id.
+  If the Drive folder's "Anyone with the link" sharing is ever turned off,
+  or the file is deleted/moved, images stop loading. Fine for a small
+  demo; revisit (cache into Firebase Storage) before any real rollout.
 - Alert thresholds (no-flow / high-flow) are an explicit stub in
   `status.ts` pending EVARAFLOW_GROUND_TRUTH.md D-008.
 - D-010 (plaintext MQTT), D-011 (QoS 0), D-012 (no device timestamp) are

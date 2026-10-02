@@ -4,10 +4,10 @@
  * Called by a one-line addition to the device's existing Apps Script Web
  * App (see the Firebase backend plan §03): immediately after it writes the
  * uploaded JPEG to Drive, it POSTs this service's `/ingest/drive-image`
- * route the Drive file's id and name so we can cache it into Storage and
- * index it in Firestore. This is the "primary push" path; a scheduled
- * reconciliation poll (not yet built) is the safety net for when that POST
- * never arrives.
+ * route the Drive file's id and name so we can index it in Firestore.
+ * Demo scope: no Storage caching — see drive.ts. This is the "primary push"
+ * path; a scheduled reconciliation poll (not yet built) is the safety net
+ * for when that POST never arrives.
  *
  * Filename contract confirmed from the real Apps Script — D-006:
  *   {node_id}_{YYYYMMDD}_{HHMMSS}.jpg
@@ -15,7 +15,7 @@
 
 import type { Request, Response } from "express";
 import { deadLetter, findDeviceByNodeId, imageExists, insertImage } from "../db";
-import { downloadAndCacheImage } from "../drive";
+import { driveImageUrls } from "../drive";
 
 const FILENAME_RE = /^([A-Za-z0-9-]+)_(\d{8})_(\d{6})\.jpg$/;
 
@@ -78,13 +78,7 @@ export async function ingestDriveImageHandler(
     // TR-10: the image is still worth keeping, just filed as Unassigned
     // rather than silently dropped.
 
-    const storagePrefix = device
-      ? `organizations/${device.orgId}/images/${fileId}`
-      : `unassigned/images/${fileId}`;
-    const { storageUrl, thumbUrl } = await downloadAndCacheImage(
-      fileId,
-      storagePrefix
-    );
+    const { storageUrl, thumbUrl } = driveImageUrls(fileId);
 
     await insertImage({
       orgId: device?.orgId ?? null,

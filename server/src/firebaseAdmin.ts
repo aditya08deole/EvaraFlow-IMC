@@ -7,10 +7,9 @@
  * Variables tab — it must never be committed to the repo or pasted
  * anywhere outside that UI.
  *
- * The same parsed credential is reused for Drive access in drive.ts, so
- * only one key exists for this whole service. Its service-account email
- * needs Viewer access shared on the Drive folder devices upload into —
- * a one-time manual step in Drive's sharing UI.
+ * Only used for Firestore here — demo scope has no Firebase Storage bucket
+ * (see drive.ts, which links to Drive-hosted images directly instead of
+ * caching them).
  */
 
 import { cert, initializeApp, type ServiceAccount } from "firebase-admin/app";
@@ -30,5 +29,4 @@ export const serviceAccount = loadServiceAccount();
 
 initializeApp({
   credential: cert(serviceAccount),
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
