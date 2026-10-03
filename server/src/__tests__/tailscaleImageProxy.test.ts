@@ -33,6 +33,10 @@ test("streams the image through with its content-type on success", async (t) => 
   await tailscaleImageProxyHandler(req("EVT-EF-002", "EVT-EF-002_20261002_153000.jpg"), res);
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, bytes);
+  // The actual bug this was written to catch: Flutter web's Image.network
+  // fetches via CanvasKit, which enforces CORS — without this header the
+  // image silently fails to render with no visible error in this app.
+  assert.equal(res.headers["Access-Control-Allow-Origin"], "*");
 });
 
 test("returns 404 when the upstream server 404s", async (t) => {

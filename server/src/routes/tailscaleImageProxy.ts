@@ -12,6 +12,16 @@
  * built from — see FILENAME_RE in ingestDriveImage.ts) specifically to
  * block path traversal (`../`) in what's otherwise a direct pass-through
  * to another server's file path.
+ *
+ * Needs `Access-Control-Allow-Origin` (confirmed necessary live, not
+ * assumed — this is exactly why the images didn't render at first): the
+ * Flutter dashboard's Image.network on web decodes via CanvasKit, which
+ * fetches bytes through the browser's own HTTP client and is therefore
+ * subject to CORS, unlike a plain `<img>` tag. Drive images never hit
+ * this because they're served from Google's CDN, which already sends a
+ * permissive CORS header. Every other route in this file is called by a
+ * device or webhook, never a browser, so this is the first one that
+ * actually needs it.
  */
 
 import type { Request, Response } from "express";
@@ -49,10 +59,13 @@ export async function tailscaleImageProxyHandler(
     }
     const bytes = Buffer.from(await upstream.arrayBuffer());
     res.set("Content-Type", upstream.headers.get("content-type") ?? "image/jpeg");
-    // Short cache only: the underlying file never changes once captured,
-    // but there's no byte-level durability here (see tailscale.ts) and no
-    // harm in letting a browser re-fetch reasonably often.
-    res.set("Cache-Control", "public, max-age=300");
+    res.set("Access-Control-Allow-Origin", "*");
+    // Long + immutable: a captured photo's bytes at a given filename never
+    // change, so once a viewer's browser has fetched one, it should never
+    // need to again — this is what actually makes repeat views fast, since
+    // the live fetch to the Tailscale server only has to happen once per
+    // browser per photo, not on every gallery open.
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
     res.send(bytes);
   } catch (err) {
     console.error(`tailscaleImageProxy: failed to reach ${upstreamUrl}`, err);
