@@ -12,6 +12,7 @@ import { backfillDriveImagesHandler } from "./routes/backfillDriveImages";
 import { requireAdmin } from "./firebaseAuth";
 import { startMqttBridge } from "./mqttBridge";
 import { sweepOfflineDevices } from "./status";
+import { pollTailscaleImages } from "./tailscalePoll";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -68,3 +69,20 @@ setInterval(() => {
     console.error("sweepOfflineDevices failed", err);
   });
 }, 60_000);
+
+// Optional, same pattern as startMqttBridge: only runs when
+// TAILSCALE_IMAGE_BASE_URL is set (pollTailscaleImages no-ops otherwise).
+// 5 minutes, not 60s like the status sweep — the Tailscale server's own
+// /list response lists its entire history (tens of thousands of
+// filenames at demo time) on every call, so this polls far less
+// aggressively than the lightweight Firestore sweep above.
+setInterval(() => {
+  pollTailscaleImages().catch((err) => {
+    console.error("pollTailscaleImages failed", err);
+  });
+}, 5 * 60_000);
+// Also run once at startup rather than waiting a full 5 minutes for the
+// first check.
+pollTailscaleImages().catch((err) => {
+  console.error("pollTailscaleImages failed", err);
+});
