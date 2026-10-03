@@ -56,3 +56,5 @@ process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 = Buffer.from(
 process.env.FIREBASE_STORAGE_BUCKET = "test-bucket.appspot.com";
 process.env.EMQX_WEBHOOK_SECRET = "test-emqx-secret";
 process.env.DRIVE_WEBHOOK_SECRET = "test-drive-secret";
+process.env.TAILSCALE_WEBHOOK_SECRET = "test-tailscale-secret";
+process.env.TAILSCALE_IMAGE_BASE_URL = "http://test-tailnet.example.ts.net:5000";

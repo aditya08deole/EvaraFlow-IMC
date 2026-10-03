@@ -7,6 +7,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { ingestTelemetryHandler } from "./routes/ingestTelemetry";
 import { ingestDriveImageHandler } from "./routes/ingestDriveImage";
+import { ingestTailscaleImageHandler } from "./routes/ingestTailscaleImage";
 import { backfillDriveImagesHandler } from "./routes/backfillDriveImages";
 import { requireAdmin } from "./firebaseAuth";
 import { startMqttBridge } from "./mqttBridge";
@@ -23,6 +24,7 @@ app.get("/health", (_req, res) => {
 
 app.post("/ingest/telemetry", ingestTelemetryHandler);
 app.post("/ingest/drive-image", ingestDriveImageHandler);
+app.post("/ingest/tailscale-image", ingestTailscaleImageHandler);
 
 // Everything above is called by devices/webhooks, never a browser, so it
 // never needed CORS. The admin routes below are called directly from the

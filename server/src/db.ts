@@ -73,7 +73,7 @@ export async function findDeviceByNodeId(
  * or silently dropped.
  */
 export async function deadLetter(
-  source: "mqtt" | "drive",
+  source: "mqtt" | "drive" | "tailscale",
   payload: unknown,
   reason: string
 ): Promise<void> {
@@ -143,11 +143,19 @@ export async function imageExists(driveFileId: string): Promise<boolean> {
 export async function insertImage(fields: {
   orgId: string | null;
   deviceId: string | null; // null = Unassigned, TR-10
+  // Dedupe key for imageExists, above. A real Drive file id for the Drive
+  // pipeline; for the Tailscale pipeline (no file-id concept) this is the
+  // filename itself, which is already unique per node+timestamp — kept
+  // under this field name rather than adding a second one, since nothing
+  // (backend or Flutter) treats it as anything but an opaque dedupe key.
   driveFileId: string;
   fileName: string;
   capturedAt: string | null;
   thumbUrl: string;
   storageUrl: string;
+  // Defaults to "drive" so the existing Drive call site doesn't need to
+  // pass this explicitly.
+  source?: "drive" | "tailscale";
 }): Promise<void> {
   const target = fields.orgId
     ? db().collection("organizations").doc(fields.orgId).collection("images")
@@ -161,5 +169,6 @@ export async function insertImage(fields: {
     receivedAt: FieldValue.serverTimestamp(),
     thumbUrl: fields.thumbUrl,
     storageUrl: fields.storageUrl,
+    source: fields.source ?? "drive",
   });
 }

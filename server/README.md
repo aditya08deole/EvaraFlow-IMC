@@ -38,7 +38,7 @@ Drive. No Firebase Storage bucket is used.
 6. Railway builds from `server/Dockerfile` and reads `server/railway.json`
    for the healthcheck (`/health`) and restart policy automatically.
 
-## Wiring the two sources at this service
+## Wiring the sources at this service
 
 - **EMQX Rule Engine**: point its HTTP action at
   `https://<your-railway-domain>/ingest/telemetry`, header
@@ -46,6 +46,15 @@ Drive. No Firebase Storage bucket is used.
 - **Apps Script**: after the existing Drive upload succeeds, POST
   `{ fileId, fileName }` to `https://<your-railway-domain>/ingest/drive-image`
   with the same header pattern using `DRIVE_WEBHOOK_SECRET`.
+- **Tailscale image server** (`server_v3.py`, run separately — not part of
+  this repo): right after it saves a file to `images_s/<node_id>/<filename>`,
+  it should POST `{ node_id, filename }` to
+  `https://<your-railway-domain>/ingest/tailscale-image`, header
+  `X-Webhook-Secret: <TAILSCALE_WEBHOOK_SECRET value>`. Also requires
+  `TAILSCALE_IMAGE_BASE_URL` (that Flask server's tailnet address) set on
+  this service — see `.env.example`. Only works for dashboard viewers on
+  the same Tailscale network as that server (no Funnel/public exposure);
+  see EVARAFLOW_GROUND_TRUTH.md D-018.
 
 ## CI/CD
 
