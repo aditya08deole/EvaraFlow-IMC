@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "test": "tsc && node --test \"dist/__tests__/**/*.test.js\"",
     "seed:device": "node dist/scripts/seedDevice.js",
+    "check:device": "node dist/scripts/checkDevice.js",
     "claims:set": "node dist/scripts/setUserClaims.js",
     "backfill:drive": "node dist/scripts/backfillDriveImages.js",
     "prune:drive": "node dist/scripts/pruneDeletedDriveImages.js"

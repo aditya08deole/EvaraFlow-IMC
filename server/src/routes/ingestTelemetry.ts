@@ -55,37 +55,25 @@
  * exceed the same physical flow ceiling.
  *
  * A decrease can also be genuine — a meter replacement or a firmware
- * reset really does start the totalizer over from a lower number. A
- * single lower reading still can't be told apart from noise, but the
- * *same* lower value repeating is a real signal a one-off glitch
- * wouldn't produce — see pendingLowerTotal/pendingLowerCount below.
+ * reset really does start the totalizer over from a lower number, and a
+ * transmission glitch (a dropped digit) can also produce one. Per
+ * EVARAFLOW_GROUND_TRUTH.md D-016, this is no longer held back pending a
+ * second confirming sighting — a decrease is accepted immediately, same
+ * as any other reading. That trades the "can't tell a glitch from a
+ * real reset on one sighting" risk for always matching whatever the
+ * device actually sent without a lag, which is the tradeoff this
+ * project wants for its current scope.
  */
 
 const MAX_PLAUSIBLE_FLOW_LPM = 1000;
-// Absorbs sensor jitter/rounding around a flat reading — not a tolerance
-// for genuine totalizer resets, which this check doesn't attempt to
-// distinguish from bad data (see the module doc above).
-const TOTALIZER_DECREASE_TOLERANCE_L = 1;
 // Floor for the elapsed time used in the implied-rate check, so two
 // messages arriving within the same second or two (a quick republish,
 // clock jitter) can't produce an artificially huge implied rate purely
 // from a tiny denominator.
 const MIN_ELAPSED_MINUTES_FOR_RATE_CHECK = 0.1;
-// How close two lower readings need to be to count as "the same value
-// repeating" rather than two unrelated glitches.
-const PENDING_LOWER_MATCH_TOLERANCE_L = 1;
-// Sightings of the same lower value required before it's trusted as a
-// genuine reset rather than noise — 2 means "seen it, then seen it
-// again," not three-strikes.
-const PENDING_LOWER_CONFIRM_COUNT = 2;
 
 import type { Request, Response } from "express";
-import {
-  deadLetter,
-  findDeviceByNodeId,
-  insertReading,
-  recordPendingLowerTotal,
-} from "../db";
+import { deadLetter, findDeviceByNodeId, insertReading } from "../db";
 import { recomputeStatusAndAlerts } from "../status";
 
 interface TelemetryPayload {
@@ -148,33 +136,6 @@ export async function processTelemetryMessage(
       "mqtt",
       parsed,
       `flow_rate ${flow} exceeds plausible ceiling of ${MAX_PLAUSIBLE_FLOW_LPM} L/min`
-    );
-    return;
-  }
-  if (
-    total !== null &&
-    device.lastTotalL !== null &&
-    total < device.lastTotalL - TOTALIZER_DECREASE_TOLERANCE_L
-  ) {
-    const matchesPending =
-      device.pendingLowerTotal !== null &&
-      Math.abs(total - device.pendingLowerTotal) <= PENDING_LOWER_MATCH_TOLERANCE_L;
-    const sightings = matchesPending ? device.pendingLowerCount + 1 : 1;
-
-    if (sightings >= PENDING_LOWER_CONFIRM_COUNT) {
-      // The same lower value has now shown up consistently — trust it as
-      // a genuine reset and accept it as the new baseline, instead of
-      // rejecting every reading from this device forever.
-      await insertReading(device, { flowLpm: flow, totalL: total, raw: parsed });
-      await recomputeStatusAndAlerts(device);
-      return;
-    }
-
-    await recordPendingLowerTotal(device, total, sightings);
-    await deadLetter(
-      "mqtt",
-      parsed,
-      `total_liters decreased unexpectedly (${total} < last known ${device.lastTotalL}) — awaiting confirmation (${sightings}/${PENDING_LOWER_CONFIRM_COUNT} consistent sightings) before accepting as a possible reset`
     );
     return;
   }

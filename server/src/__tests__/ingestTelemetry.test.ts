@@ -27,8 +27,6 @@ const DEVICE = {
   lastFlowLpm: null,
   lastTotalL: null,
   lastSeenAt: null,
-  pendingLowerTotal: null,
-  pendingLowerCount: 0,
 };
 
 function webhookBody(topic: string, payloadObj: unknown) {
@@ -313,14 +311,14 @@ test("dead-letters a flow_rate above the plausible ceiling", async (t) => {
   assert.equal(insertReading.mock.callCount(), 0);
 });
 
-test("dead-letters a totalizer that decreased from its last known value, pending confirmation — the real incident this guards against", async (t) => {
+test("accepts a decreased totalizer immediately — no pending-confirmation gate (EVARAFLOW_GROUND_TRUTH.md D-016)", async (t) => {
   const deadLetter = t.mock.method(db, "deadLetter", async () => {});
   t.mock.method(db, "findDeviceByNodeId", async () => ({
     ...DEVICE,
     lastTotalL: 10050.8,
   }));
   const insertReading = t.mock.method(db, "insertReading", async () => {});
-  const recordPending = t.mock.method(db, "recordPendingLowerTotal", async () => {});
+  t.mock.method(statusModule, "recomputeStatusAndAlerts", async () => {});
   const res = fakeRes();
   await ingestTelemetryHandler(
     fakeReq({
@@ -334,97 +332,13 @@ test("dead-letters a totalizer that decreased from its last known value, pending
     res
   );
   assert.equal(res.statusCode, 200);
-  assert.match(
-    deadLetter.mock.calls[0].arguments[2] as string,
-    /awaiting confirmation \(1\/2/
-  );
-  assert.equal(insertReading.mock.callCount(), 0);
-  assert.equal(recordPending.mock.calls[0].arguments[1], 1234.5);
-  assert.equal(recordPending.mock.calls[0].arguments[2], 1);
-});
-
-test("accepts a decreased totalizer as a genuine reset once the same lower value repeats — a real reset shouldn't be rejected forever", async (t) => {
-  t.mock.method(db, "deadLetter", async () => {});
-  t.mock.method(db, "findDeviceByNodeId", async () => ({
-    ...DEVICE,
-    lastTotalL: 10050.8,
-    pendingLowerTotal: 1234.5, // the same value seen once already
-    pendingLowerCount: 1,
-  }));
-  const insertReading = t.mock.method(db, "insertReading", async () => {});
-  t.mock.method(statusModule, "recomputeStatusAndAlerts", async () => {});
-  const res = fakeRes();
-  await ingestTelemetryHandler(
-    fakeReq({
-      body: webhookBody("evaratech/v1/EVT-EF-002/telemetry", {
-        node_id: "EVT-EF-002",
-        total_liters: 1234.5,
-        flow_rate: 3,
-      }),
-      headers: AUTH_HEADERS,
-    }),
-    res
-  );
-  assert.equal(res.statusCode, 200);
+  assert.equal(deadLetter.mock.callCount(), 0);
   assert.equal(insertReading.mock.callCount(), 1);
   const [, fields] = insertReading.mock.calls[0].arguments as [
     unknown,
     { totalL: number | null },
   ];
   assert.equal(fields.totalL, 1234.5);
-});
-
-test("treats an unrelated second lower value as a new candidate, not a confirmation", async (t) => {
-  t.mock.method(db, "deadLetter", async () => {});
-  t.mock.method(db, "findDeviceByNodeId", async () => ({
-    ...DEVICE,
-    lastTotalL: 10050.8,
-    pendingLowerTotal: 1234.5, // a different earlier glitch
-    pendingLowerCount: 1,
-  }));
-  const insertReading = t.mock.method(db, "insertReading", async () => {});
-  const recordPending = t.mock.method(db, "recordPendingLowerTotal", async () => {});
-  const res = fakeRes();
-  await ingestTelemetryHandler(
-    fakeReq({
-      body: webhookBody("evaratech/v1/EVT-EF-002/telemetry", {
-        node_id: "EVT-EF-002",
-        total_liters: 500.0, // unrelated to the pending 1234.5
-        flow_rate: 3,
-      }),
-      headers: AUTH_HEADERS,
-    }),
-    res
-  );
-  assert.equal(res.statusCode, 200);
-  assert.equal(insertReading.mock.callCount(), 0);
-  assert.equal(recordPending.mock.calls[0].arguments[1], 500.0);
-  assert.equal(recordPending.mock.calls[0].arguments[2], 1);
-});
-
-test("accepts a totalizer within the small jitter tolerance of its last known value", async (t) => {
-  const deadLetter = t.mock.method(db, "deadLetter", async () => {});
-  t.mock.method(db, "findDeviceByNodeId", async () => ({
-    ...DEVICE,
-    lastTotalL: 10050.8,
-  }));
-  const insertReading = t.mock.method(db, "insertReading", async () => {});
-  t.mock.method(statusModule, "recomputeStatusAndAlerts", async () => {});
-  const res = fakeRes();
-  await ingestTelemetryHandler(
-    fakeReq({
-      body: webhookBody("evaratech/v1/EVT-EF-002/telemetry", {
-        node_id: "EVT-EF-002",
-        total_liters: 10050.2, // within the 1L tolerance, not a real decrease
-        flow_rate: 3,
-      }),
-      headers: AUTH_HEADERS,
-    }),
-    res
-  );
-  assert.equal(res.statusCode, 200);
-  assert.equal(deadLetter.mock.callCount(), 0);
-  assert.equal(insertReading.mock.callCount(), 1);
 });
 
 test("accepts a valid real-shape reading for a registered device", async (t) => {
