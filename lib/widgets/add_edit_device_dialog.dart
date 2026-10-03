@@ -1,8 +1,42 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/device.dart';
+import '../services/api_service.dart';
 import '../theme/app_shapes.dart';
 import '../theme/app_theme.dart';
+
+/// Returned by [AddEditDeviceDialog] instead of a bare [Device] so an
+/// optional Drive folder link/id pasted into the dialog can travel back to
+/// the caller (all_devices_screen.dart) alongside it, to trigger
+/// ApiService.startDriveBackfill once the device itself has been saved.
+class DeviceFormResult {
+  final Device device;
+  final String? driveFolderId;
+
+  const DeviceFormResult(this.device, this.driveFolderId);
+}
+
+/// Accepts a bare Drive folder id, a `.../drive/folders/<id>...` link, or a
+/// `.../open?id=<id>` link; returns null for anything else — including an
+/// obvious *file* link (`/file/d/...`), which is a different concept and
+/// must not be silently treated as a folder.
+String? extractDriveFolderId(String input) {
+  final trimmed = input.trim();
+  if (trimmed.isEmpty) return null;
+
+  final bareId = RegExp(r'^[A-Za-z0-9_-]{10,}$');
+  if (bareId.hasMatch(trimmed)) return trimmed;
+
+  final folderLink = RegExp(r'/folders/([A-Za-z0-9_-]{10,})');
+  final folderMatch = folderLink.firstMatch(trimmed);
+  if (folderMatch != null) return folderMatch.group(1);
+
+  final openLink = RegExp(r'[?&]id=([A-Za-z0-9_-]{10,})');
+  final openMatch = openLink.firstMatch(trimmed);
+  if (openMatch != null) return openMatch.group(1);
+
+  return null;
+}
 
 class AddEditDeviceDialog extends StatefulWidget {
   final Device? initialDevice;
@@ -21,19 +55,30 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
   late TextEditingController _locationController;
   late TextEditingController _intervalController;
   late TextEditingController _mqttPasswordController;
+  late TextEditingController _driveFolderController;
   ConsumptionMethod _consumptionMethod = ConsumptionMethod.totalizer;
   bool _obscurePassword = true;
+  bool _isSubmitting = false;
+  String? _driveFolderError;
+  String? _submitError;
+
+  final ApiService _apiService = ApiService();
 
   bool get isEditing => widget.initialDevice != null;
 
   // Derived per the confirmed real-firmware convention
   // (EVARAFLOW_GROUND_TRUTH.md D-004, D-006) — not independently editable,
-  // since the device firmware hardcodes this exact pattern itself.
-  String get _mqttClientId => 'EVT-${_idController.text.trim()}';
+  // since the device firmware hardcodes this exact pattern itself. The
+  // real firmware sets MQTT_CLIENT_ID and the Drive filename prefix equal
+  // to the device's own id directly (e.g. "EVT-EF-002", which already
+  // carries its own "EVT-" as part of its own naming, not a prefix added
+  // on top) — these used to add a second "EVT-" prefix / a trailing "_",
+  // producing values the real backend wouldn't actually match against.
+  String get _mqttClientId => _idController.text.trim();
   String get _mqttUsername => 'device-${_idController.text.trim()}';
   String get _mqttTopic =>
       'evaratech/v1/${_idController.text.trim()}/telemetry';
-  String get _driveMatchKey => '${_idController.text.trim()}_';
+  String get _driveMatchKey => _idController.text.trim();
 
   @override
   void initState() {
@@ -46,6 +91,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
       text: d?.expectedIntervalSeconds.toString() ?? '300',
     );
     _mqttPasswordController = TextEditingController();
+    _driveFolderController = TextEditingController();
     if (d != null) {
       _consumptionMethod = d.consumptionMethod;
     }
@@ -60,6 +106,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
     _locationController.dispose();
     _intervalController.dispose();
     _mqttPasswordController.dispose();
+    _driveFolderController.dispose();
     super.dispose();
   }
 
@@ -76,11 +123,37 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
     });
   }
 
-  void _submit() {
-    if (_formKey.currentState!.validate()) {
+  Future<void> _submit() async {
+    setState(() {
+      _driveFolderError = null;
+      _submitError = null;
+    });
+
+    if (!_formKey.currentState!.validate()) return;
+
+    final folderInput = _driveFolderController.text;
+    String? driveFolderId;
+    if (folderInput.trim().isNotEmpty) {
+      driveFolderId = extractDriveFolderId(folderInput);
+      if (driveFolderId == null) {
+        setState(
+          () => _driveFolderError =
+              "Doesn't look like a Drive folder link or id — paste the folder's share link, or just its id.",
+        );
+        return;
+      }
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      // Real org_id claim, not a typed/hardcoded value — a device must
+      // belong to the signed-in administrator's own org for
+      // firestore.rules to accept the write that follows.
+      final orgId = await _apiService.currentOrgId();
+
       final device = Device(
         deviceId: _idController.text.trim(),
-        orgId: 'org-evaratech-01',
+        orgId: orgId,
         name: _nameController.text.trim(),
         location: _locationController.text.trim(),
         mqttTopic: _mqttTopic,
@@ -98,7 +171,14 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
       // real backend yet, so it's intentionally dropped here rather than
       // threaded onto Device as if it were ordinary state.
 
-      Navigator.of(context).pop(device);
+      if (!mounted) return;
+      Navigator.of(context).pop(DeviceFormResult(device, driveFolderId));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _submitError = 'Could not save: $e';
+      });
     }
   }
 
@@ -289,6 +369,51 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                 ),
                 const SizedBox(height: 12),
 
+                // Google Drive folder — optional. Paste a share link or a
+                // bare folder id; on save this triggers a one-time backfill
+                // of whatever's already in that folder (server/src/driveBackfill.ts)
+                // so pre-existing photos show up in the gallery without
+                // needing someone to run a script by hand. Live ingestion
+                // doesn't need this at all — it routes by filename, not
+                // folder — this is purely a one-time catch-up convenience.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Google Drive Folder (optional)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: _driveFolderController,
+                      style: const TextStyle(fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText:
+                            'Paste the folder\'s share link, or just its id',
+                        hintStyle: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textMuted,
+                        ),
+                        isDense: true,
+                        errorText: _driveFolderError,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
                 // Interval & Calculation method
                 Row(
                   children: [
@@ -350,6 +475,28 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                     ),
                   ],
                 ),
+                if (_submitError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerLight,
+                      borderRadius: BorderRadius.circular(AppShapes.radiusSm),
+                    ),
+                    child: Text(
+                      _submitError!,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.dangerRed,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
 
                 // Actions
@@ -357,12 +504,14 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       child: const Text('Cancel'),
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton(
-                      onPressed: _submit,
+                      onPressed: _isSubmitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -371,7 +520,16 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                           vertical: 12,
                         ),
                       ),
-                      child: Text(isEditing ? 'Save Changes' : 'Create Device'),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(isEditing ? 'Save Changes' : 'Create Device'),
                     ),
                   ],
                 ),

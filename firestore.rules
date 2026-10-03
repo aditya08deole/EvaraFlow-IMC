@@ -69,7 +69,13 @@ service cloud.firestore {
       allow write: if false;
     }
     match /organizations/{org}/images/{imageId} {
-      allow write: if false;
+      // create/update: Admin SDK only (ingestion routes). delete: an
+      // administrator may remove an image record whose underlying Drive
+      // file no longer loads (lib/widgets/image_gallery_modal.dart's
+      // errorBuilder calls ApiService.deleteImageRecord) — narrow, since
+      // it can only ever remove a reference, never fabricate or alter one.
+      allow create, update: if false;
+      allow delete: if signedIn() && orgId() == org && isAdmin();
     }
 
     // --- Platform-wide, not org-scoped ---

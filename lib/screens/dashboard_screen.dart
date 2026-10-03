@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
 import '../models/image_record.dart';
+import '../services/api_service.dart';
 import '../widgets/device_header.dart';
 import '../widgets/current_reading_card.dart';
 import '../widgets/latest_image_card.dart';
@@ -22,6 +23,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLogsExpanded = false;
+  final ApiService _apiService = ApiService();
 
   void _showGallery(
     BuildContext context,
@@ -37,22 +39,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
       barrierColor: AppColors.textPrimary.withValues(alpha: 0.12),
       builder: (ctx) => ImageGalleryModal(
         device: provider.selectedDevice!,
-        images: provider.deviceImages,
         initialSelectedImage: selectedImage,
+        onImageBroken: (img) => provider.removeBrokenImage(img.id),
       ),
     );
   }
 
   void _showEditDialog(BuildContext context, DeviceProvider provider) async {
     if (provider.selectedDevice == null) return;
-    final updated = await showDialog(
+    final result = await showDialog<DeviceFormResult>(
       context: context,
       barrierColor: AppColors.textPrimary.withValues(alpha: 0.12),
       builder: (ctx) =>
           AddEditDeviceDialog(initialDevice: provider.selectedDevice),
     );
-    if (updated != null) {
-      provider.updateDevice(updated);
+    if (result == null) return;
+    try {
+      await provider.updateDevice(result.device);
+      if (result.driveFolderId != null && context.mounted) {
+        await _apiService.startDriveBackfill(
+          result.driveFolderId!,
+          result.device.deviceId,
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save device: $e'),
+          backgroundColor: AppColors.dangerRed,
+        ),
+      );
     }
   }
 
@@ -145,6 +162,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onViewAllPressed: () => _showGallery(context, provider),
                         onImageClick: (img) =>
                             _showGallery(context, provider, selectedImage: img),
+                        onImageBroken: (img) =>
+                            provider.removeBrokenImage(img.id),
                       ),
                     ],
                   ),
@@ -178,6 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onViewAllPressed: () => _showGallery(context, provider),
                   onImageClick: (img) =>
                       _showGallery(context, provider, selectedImage: img),
+                  onImageBroken: (img) => provider.removeBrokenImage(img.id),
                 ),
               ],
             ),

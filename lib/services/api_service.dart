@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import '../config.dart';
 import '../models/device.dart';
 import '../models/reading.dart';
 import '../models/image_record.dart';
@@ -19,7 +22,7 @@ class ApiService {
   ApiService({FirebaseFirestore? firestore})
     : _db = firestore ?? FirebaseFirestore.instance;
 
-  Future<String> _orgId() async {
+  Future<String> currentOrgId() async {
     final cached = _cachedOrgId;
     if (cached != null) return cached;
     final user = FirebaseAuth.instance.currentUser;
@@ -50,7 +53,7 @@ class ApiService {
     String search = '',
     String statusFilter = 'all',
   }) async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final snap = await _devicesCol(orgId).get();
     var list = snap.docs.map((d) => _deviceFromDoc(orgId, d)).toList();
 
@@ -72,10 +75,59 @@ class ApiService {
   }
 
   Future<Device?> getDevice(String deviceId) async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final doc = await _devicesCol(orgId).doc(deviceId).get();
     if (!doc.exists) return null;
     return _deviceFromDoc(orgId, doc);
+  }
+
+  // Live counterpart of getDevice — status/lastSeenAt/totalizer baseline
+  // update the instant status.ts (or an admin edit) writes them, instead
+  // of only refreshing when the device is re-selected.
+  Stream<Device?> watchDevice(String deviceId) async* {
+    final orgId = await currentOrgId();
+    yield* _devicesCol(orgId)
+        .doc(deviceId)
+        .snapshots()
+        .map((doc) => doc.exists ? _deviceFromDoc(orgId, doc) : null);
+  }
+
+  Map<String, dynamic> _deviceToFirestoreFields(Device device) => {
+    'name': device.name,
+    'location': device.location,
+    'mqttTopic': device.mqttTopic,
+    'driveMatchKey': device.driveMatchKey,
+    'expectedIntervalSeconds': device.expectedIntervalSeconds,
+    'consumptionMethod': device.consumptionMethod.name,
+    'isActive': device.isActive,
+  };
+
+  // Writes organizations/{orgId}/devices/{deviceId} AND deviceIndex/{deviceId}
+  // — the same two docs server/src/scripts/seedDevice.ts writes, so a
+  // device created through this dialog is accepted by the real ingestion
+  // pipeline (findDeviceByNodeId in server/src/db.ts) exactly like one
+  // seeded from the CLI. Gated by firestore.rules'
+  // `allow write: if signedIn() && orgId() == org && isAdmin();` — a
+  // non-administrator's call here is rejected by Firestore itself.
+  Future<void> createDevice(Device device) async {
+    final orgId = await currentOrgId();
+    final batch = _db.batch();
+    batch.set(_devicesCol(orgId).doc(device.deviceId), {
+      ..._deviceToFirestoreFields(device),
+      'status': 'noData',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(_db.collection('deviceIndex').doc(device.deviceId), {
+      'orgId': orgId,
+    });
+    await batch.commit();
+  }
+
+  Future<void> updateDeviceRecord(Device device) async {
+    final orgId = await currentOrgId();
+    await _devicesCol(
+      orgId,
+    ).doc(device.deviceId).update(_deviceToFirestoreFields(device));
   }
 
   Device _deviceFromDoc(
@@ -123,7 +175,7 @@ class ApiService {
   // Pipeline A: MQTT telemetry, written by server/src/db.ts insertReading
   // into organizations/{orgId}/devices/{deviceId}/readings_recent.
   Future<Reading?> getLatestReading(String deviceId) async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final snap = await _devicesCol(orgId)
         .doc(deviceId)
         .collection('readings_recent')
@@ -134,18 +186,25 @@ class ApiService {
     return _readingFromDoc(deviceId, snap.docs.first);
   }
 
+  // Live counterpart of getLatestReading — pushes a new value the instant
+  // a reading lands in Firestore, instead of needing a manual re-fetch.
+  Stream<Reading?> watchLatestReading(String deviceId) async* {
+    final orgId = await currentOrgId();
+    yield* _devicesCol(orgId)
+        .doc(deviceId)
+        .collection('readings_recent')
+        .orderBy('receivedAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .map((snap) => snap.docs.isEmpty ? null : _readingFromDoc(deviceId, snap.docs.first));
+  }
+
   Future<List<Reading>> getHistoricalReadings(
     String deviceId, {
     String range = 'Today',
   }) async {
-    final orgId = await _orgId();
-    final now = DateTime.now();
-    final cutoff = switch (range) {
-      '7 Days' => now.subtract(const Duration(days: 7)),
-      '30 Days' => now.subtract(const Duration(days: 30)),
-      _ => DateTime(now.year, now.month, now.day),
-    };
-
+    final orgId = await currentOrgId();
+    final cutoff = _historicalRangeCutoff(range);
     final snap = await _devicesCol(orgId)
         .doc(deviceId)
         .collection('readings_recent')
@@ -153,6 +212,30 @@ class ApiService {
         .orderBy('receivedAt')
         .get();
     return snap.docs.map((d) => _readingFromDoc(deviceId, d)).toList();
+  }
+
+  Stream<List<Reading>> watchHistoricalReadings(
+    String deviceId, {
+    String range = 'Today',
+  }) async* {
+    final orgId = await currentOrgId();
+    final cutoff = _historicalRangeCutoff(range);
+    yield* _devicesCol(orgId)
+        .doc(deviceId)
+        .collection('readings_recent')
+        .where('receivedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(cutoff))
+        .orderBy('receivedAt')
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => _readingFromDoc(deviceId, d)).toList());
+  }
+
+  DateTime _historicalRangeCutoff(String range) {
+    final now = DateTime.now();
+    return switch (range) {
+      '7 Days' => now.subtract(const Duration(days: 7)),
+      '30 Days' => now.subtract(const Duration(days: 30)),
+      _ => DateTime(now.year, now.month, now.day),
+    };
   }
 
   Reading _readingFromDoc(
@@ -177,7 +260,7 @@ class ApiService {
   // organizations/{orgId}/images (flat collection, deviceId as a field —
   // not a per-device subcollection).
   Future<ImageRecord?> getLatestImage(String deviceId) async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final snap = await _imagesCol(orgId)
         .where('deviceId', isEqualTo: deviceId)
         // Ordered by capturedAt (parsed from the filename's timestamp —
@@ -201,13 +284,36 @@ class ApiService {
   static const int _maxGalleryImages = 100;
 
   Future<List<ImageRecord>> getDeviceImages(String deviceId) async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final snap = await _imagesCol(orgId)
         .where('deviceId', isEqualTo: deviceId)
         .orderBy('capturedAt', descending: true)
         .limit(_maxGalleryImages)
         .get();
     return snap.docs.map(_imageFromDoc).toList();
+  }
+
+  // Live counterpart of getDeviceImages — a freshly-uploaded photo (or one
+  // just backfilled) appears without reselecting the device.
+  Stream<List<ImageRecord>> watchDeviceImages(String deviceId) async* {
+    final orgId = await currentOrgId();
+    yield* _imagesCol(orgId)
+        .where('deviceId', isEqualTo: deviceId)
+        .orderBy('capturedAt', descending: true)
+        .limit(_maxGalleryImages)
+        .snapshots()
+        .map((snap) => snap.docs.map(_imageFromDoc).toList());
+  }
+
+  // Deletes one image's Firestore record — only ever called from an
+  // administrator's explicit "Remove if deleted from Drive" tap (see
+  // DeviceProvider.removeBrokenImage), never automatically from a load
+  // failure. For bulk, verified cleanup (confirmed against the real Drive
+  // folder listing, not an unreliable browser load error), use
+  // server/src/driveBackfill.ts's pruneDeletedImages instead.
+  Future<void> deleteImageRecord(String imageId) async {
+    final orgId = await currentOrgId();
+    await _imagesCol(orgId).doc(imageId).delete();
   }
 
   ImageRecord _imageFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
@@ -233,7 +339,7 @@ class ApiService {
   // this will honestly return an empty list until that's built — not a
   // fixture fallback.
   Future<List<AlertItem>> getAlerts() async {
-    final orgId = await _orgId();
+    final orgId = await currentOrgId();
     final snap = await _alertsCol(
       orgId,
     ).orderBy('openedAt', descending: true).get();
@@ -265,5 +371,60 @@ class ApiService {
       acknowledgedBy: data['acknowledgedBy'] as String?,
       resolvedAt: (data['resolvedAt'] as Timestamp?)?.toDate(),
     );
+  }
+
+  // Rejected/anomalous ingestion events (server/src/db.ts deadLetter) —
+  // platform-wide, not org-scoped, since a bad reading can arrive before
+  // its device/org is even known. firestore.rules already restricts reads
+  // of this collection to administrators, so a non-admin's query here
+  // simply comes back empty rather than needing a separate client-side
+  // role check.
+  Future<List<Map<String, dynamic>>> getRecentDeadLetters({
+    int limit = 20,
+  }) async {
+    final snap = await _db
+        .collection('deadLetters')
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+    return snap.docs
+        .map(
+          (d) => {
+            'id': d.id,
+            'source': d.data()['source'],
+            'reason': d.data()['reason'],
+            'payload': d.data()['payload'],
+            'createdAt': (d.data()['createdAt'] as Timestamp?)?.toDate(),
+          },
+        )
+        .toList();
+  }
+
+  // Triggers server/src/routes/backfillDriveImages.ts, the only thing in
+  // this app that talks to the backend server rather than Firestore
+  // directly — listing a Drive folder and writing Firestore both need the
+  // service-account credentials only that server holds. Fire-and-forget
+  // on the server side: this resolves once the server has *accepted* the
+  // job (HTTP 202), not once indexing has actually finished — a real
+  // folder can hold thousands of files and take minutes.
+  Future<void> startDriveBackfill(String folderId, String deviceId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw StateError('Not signed in');
+    }
+    final idToken = await user.getIdToken();
+    final res = await http.post(
+      Uri.parse('$backendBaseUrl/admin/backfill-drive-images'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
+      body: jsonEncode({'folderId': folderId, 'deviceId': deviceId}),
+    );
+    if (res.statusCode != 202) {
+      throw StateError(
+        'Backfill request failed: HTTP ${res.statusCode} ${res.body}',
+      );
+    }
   }
 }

@@ -33,8 +33,12 @@ class Device {
 
   /// Derived from [deviceId] per the confirmed real-firmware convention
   /// (EVARAFLOW_GROUND_TRUTH.md D-004) — not independently configurable,
-  /// so these are computed rather than stored/editable.
-  String get mqttClientId => 'EVT-$deviceId';
+  /// so these are computed rather than stored/editable. The real firmware
+  /// sets MQTT_CLIENT_ID equal to the device's own id (e.g. "EVT-EF-002",
+  /// which already carries its own "EVT-" as part of its own naming, not
+  /// a prefix added on top) — mqttClientId used to add a second "EVT-"
+  /// prefix, producing the wrong "EVT-EVT-EF-002".
+  String get mqttClientId => deviceId;
   String get mqttUsername => 'device-$deviceId';
 
   bool get isStale {

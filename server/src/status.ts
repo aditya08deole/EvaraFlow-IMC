@@ -27,12 +27,9 @@ export async function recomputeStatusAndAlerts(
     .doc(device.deviceId);
 
   // A reading just arrived, so by definition the device is online right now.
-  // The interesting case — flipping to offline after silence — needs a
-  // separate scheduled sweep (not yet built; on Railway this would be a
-  // small cron process or Railway's own Cron Jobs feature, since there is
-  // no Cloud Scheduler here) that checks last_seen_at against
-  // expected_interval_s for every device; a single incoming reading can
-  // only ever prove "online," never "offline."
+  // The interesting case — flipping to offline after silence — can only
+  // ever be proven by the absence of a reading, never by one arriving, so
+  // it's handled separately by sweepOfflineDevices below.
   await deviceRef.update({
     status: "online",
     statusUpdatedAt: FieldValue.serverTimestamp(),
@@ -40,4 +37,45 @@ export async function recomputeStatusAndAlerts(
 
   // Extension point: no-flow / high-flow threshold checks go here once
   // D-008's thresholds are confirmed rather than assumed.
+}
+
+/**
+ * Runs on a short interval from index.ts (no Cloud Scheduler on Railway,
+ * so a plain setInterval in this always-on process stands in for one) and
+ * flips any device whose last_seen_at has gone stale from "online" to
+ * "offline" — the one case recomputeStatusAndAlerts above can never prove
+ * on its own, since a reading arriving only ever proves the opposite.
+ * lib/services/api_service.dart's Device.isStale check already hides this
+ * same staleness client-side at read time regardless, but without this
+ * sweep the stored `status` field itself stays wrong indefinitely for
+ * anything reading Firestore directly (the Data Quality panel, a future
+ * integration, a raw query) — this makes the source of truth correct, not
+ * just its display.
+ */
+export async function sweepOfflineDevices(): Promise<void> {
+  const db = getFirestore();
+  const snap = await db
+    .collectionGroup("devices")
+    .where("status", "==", "online")
+    .get();
+
+  const now = Date.now();
+  let flipped = 0;
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const lastSeenAt = (data.lastSeenAt as { toDate?: () => Date } | undefined)?.toDate?.();
+    if (!lastSeenAt) continue;
+    const expectedIntervalSeconds = (data.expectedIntervalSeconds as number | undefined) ?? 300;
+    const staleAfterMs = expectedIntervalSeconds * 3 * 1000;
+    if (now - lastSeenAt.getTime() > staleAfterMs) {
+      await doc.ref.update({
+        status: "offline",
+        statusUpdatedAt: FieldValue.serverTimestamp(),
+      });
+      flipped++;
+    }
+  }
+  if (flipped > 0) {
+    console.log(`sweepOfflineDevices: flipped ${flipped} device(s) to offline`);
+  }
 }

@@ -11,6 +11,7 @@ class LatestImageCard extends StatelessWidget {
   final Device? device;
   final VoidCallback onViewAllPressed;
   final Function(ImageRecord) onImageClick;
+  final ValueChanged<ImageRecord> onImageBroken;
 
   const LatestImageCard({
     super.key,
@@ -18,6 +19,7 @@ class LatestImageCard extends StatelessWidget {
     required this.device,
     required this.onViewAllPressed,
     required this.onImageClick,
+    required this.onImageBroken,
   });
 
   String _formatRelativeTime(DateTime dt) {
@@ -162,15 +164,52 @@ class LatestImageCard extends StatelessWidget {
                           if (loadingProgress == null) return child;
                           return const SkeletonCard(height: 200);
                         },
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          color: AppColors.glassSurface,
-                          child: const Center(
-                            child: Icon(
-                              Icons.broken_image_outlined,
-                              color: AppColors.textMuted,
+                        errorBuilder: (context, error, stackTrace) {
+                          // A load failure here could mean the file was
+                          // deleted from Drive — or it could just as easily
+                          // be lh3.googleusercontent.com transiently
+                          // throttling an unauthenticated hotlink request
+                          // (this is unofficial hotlinking, not a supported
+                          // API — see drive.ts). Those two look identical to
+                          // Image.network, so this never deletes on its own;
+                          // an administrator confirms it only after actually
+                          // checking Drive, via the button below.
+                          return Container(
+                            color: AppColors.glassSurface,
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: AppColors.textMuted,
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Image unavailable',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => onImageBroken(image!),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: const Text(
+                                      'Remove if deleted from Drive',
+                                      style: TextStyle(fontSize: 10),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
 

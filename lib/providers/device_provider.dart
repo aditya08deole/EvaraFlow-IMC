@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/device.dart';
@@ -26,6 +27,15 @@ class DeviceProvider with ChangeNotifier {
   bool _isImagesLoading = true;
   String? _dashboardError;
   String? _imagesError;
+
+  // Live Firestore listeners for whichever device is currently selected —
+  // replaced (not merely re-fetched) on every selectDevice/setRange, so a
+  // new real MQTT reading or a freshly backfilled/deleted image reflects
+  // immediately instead of needing a manual refresh or device reselect.
+  StreamSubscription<Device?>? _deviceSub;
+  StreamSubscription<Reading?>? _latestReadingSub;
+  StreamSubscription<List<Reading>>? _historicalSub;
+  StreamSubscription<List<ImageRecord>>? _imagesSub;
 
   String _selectedRange = 'Today';
   int _tablePage = 1;
@@ -96,9 +106,22 @@ class DeviceProvider with ChangeNotifier {
     }
   }
 
+  // Firestore listeners only push a rebuild when data actually changes —
+  // but "4m ago" labels and the isStale() offline check in
+  // ApiService._deviceFromDoc both depend on comparing stored timestamps
+  // against DateTime.now(), which keeps moving even when nothing in
+  // Firestore does. Without this, those would freeze at whatever they
+  // said the moment the last real update arrived instead of counting up
+  // live. This never touches the network — it's a local-only rebuild
+  // trigger, so it's cheap enough to run often.
+  Timer? _tickTimer;
+
   DeviceProvider({ApiService? apiService})
     : _apiService = apiService ?? ApiService() {
     init();
+    _tickTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      notifyListeners();
+    });
   }
 
   Future<void> init() async {
@@ -140,11 +163,11 @@ class DeviceProvider with ChangeNotifier {
       (d) => d.deviceId == deviceId,
       orElse: () => Device(
         deviceId: deviceId,
-        orgId: 'org-001',
+        orgId: _selectedDevice?.orgId ?? '',
         name: deviceId,
         location: 'Unknown',
-        mqttTopic: 'evaraflow/org-001/$deviceId/telemetry',
-        driveMatchKey: '${deviceId}_',
+        mqttTopic: 'evaratech/v1/$deviceId/telemetry',
+        driveMatchKey: deviceId,
         expectedIntervalSeconds: 300,
         status: DeviceStatus.noData,
       ),
@@ -170,50 +193,83 @@ class DeviceProvider with ChangeNotifier {
 
     notifyListeners();
 
-    // Load data for the new device with device ID guard
-    _loadDeviceDashboardData(deviceId);
+    _subscribeToDevice(deviceId);
   }
 
-  Future<void> _loadDeviceDashboardData(String deviceId) async {
-    try {
-      // Pipeline A: Readings
-      final latest = await _apiService.getLatestReading(deviceId);
-      final historical = await _apiService.getHistoricalReadings(
-        deviceId,
-        range: _selectedRange,
-      );
+  // Live — not a one-shot fetch. Cancels whatever the previous device (or
+  // range) was subscribed to and resubscribes, so exactly one listener per
+  // stream is ever active at a time.
+  void _subscribeToDevice(String deviceId) {
+    _deviceSub?.cancel();
+    _latestReadingSub?.cancel();
+    _imagesSub?.cancel();
 
-      // Rule 4: Guard by device ID (ignore late response if user switched away)
-      if (_selectedDeviceId != deviceId) return;
+    _deviceSub = _apiService.watchDevice(deviceId).listen(
+      (device) {
+        if (_selectedDeviceId != deviceId) return;
+        if (device != null) {
+          _selectedDevice = device;
+          final idx = _devices.indexWhere((d) => d.deviceId == deviceId);
+          if (idx != -1) _devices[idx] = device;
+        }
+        notifyListeners();
+      },
+      onError: (e) {
+        if (_selectedDeviceId != deviceId) return;
+        debugPrint('watchDevice error: $e');
+      },
+    );
 
-      _latestReading = latest;
-      _historicalReadings = historical;
-      _isDashboardLoading = false;
-      notifyListeners();
-    } catch (e) {
-      if (_selectedDeviceId != deviceId) return;
-      _dashboardError = 'Unable to retrieve device telemetry data.';
-      _isDashboardLoading = false;
-      notifyListeners();
-    }
+    _latestReadingSub = _apiService.watchLatestReading(deviceId).listen(
+      (reading) {
+        if (_selectedDeviceId != deviceId) return;
+        _latestReading = reading;
+        _isDashboardLoading = false;
+        notifyListeners();
+      },
+      onError: (e) {
+        if (_selectedDeviceId != deviceId) return;
+        _dashboardError = 'Unable to retrieve device telemetry data.';
+        _isDashboardLoading = false;
+        notifyListeners();
+      },
+    );
 
-    try {
-      // Pipeline B: Images
-      final latestImg = await _apiService.getLatestImage(deviceId);
-      final gallery = await _apiService.getDeviceImages(deviceId);
+    _subscribeToHistoricalReadings(deviceId);
 
-      if (_selectedDeviceId != deviceId) return;
+    _imagesSub = _apiService.watchDeviceImages(deviceId).listen(
+      (images) {
+        if (_selectedDeviceId != deviceId) return;
+        _deviceImages = images;
+        _latestImage = images.isNotEmpty ? images.first : null;
+        _isImagesLoading = false;
+        notifyListeners();
+      },
+      onError: (e) {
+        if (_selectedDeviceId != deviceId) return;
+        _imagesError = 'Unable to retrieve Google Drive images.';
+        _isImagesLoading = false;
+        notifyListeners();
+      },
+    );
+  }
 
-      _latestImage = latestImg;
-      _deviceImages = gallery;
-      _isImagesLoading = false;
-      notifyListeners();
-    } catch (e) {
-      if (_selectedDeviceId != deviceId) return;
-      _imagesError = 'Unable to retrieve Google Drive images.';
-      _isImagesLoading = false;
-      notifyListeners();
-    }
+  void _subscribeToHistoricalReadings(String deviceId) {
+    _historicalSub?.cancel();
+    _historicalSub = _apiService
+        .watchHistoricalReadings(deviceId, range: _selectedRange)
+        .listen(
+          (readings) {
+            if (_selectedDeviceId != deviceId) return;
+            _historicalReadings = readings;
+            notifyListeners();
+          },
+          onError: (e) {
+            if (_selectedDeviceId != deviceId) return;
+            _dashboardError = 'Unable to retrieve device telemetry data.';
+            notifyListeners();
+          },
+        );
   }
 
   void setRange(String range) {
@@ -221,10 +277,36 @@ class DeviceProvider with ChangeNotifier {
     _selectedRange = range;
     _tablePage = 1;
     if (_selectedDeviceId != null) {
-      _isDashboardLoading = true;
-      notifyListeners();
-      _loadDeviceDashboardData(_selectedDeviceId!);
+      _subscribeToHistoricalReadings(_selectedDeviceId!);
     }
+    notifyListeners();
+  }
+
+  // Called only when an administrator explicitly taps "Remove if deleted
+  // from Drive" on a broken-image placeholder (see image_gallery_modal.dart
+  // / latest_image_card.dart) — deliberately never automatic. A failed
+  // image load can't be told apart from lh3.googleusercontent.com
+  // transiently throttling an unauthenticated hotlink request (unofficial
+  // hotlinking, not a supported API), so auto-deleting on load error would
+  // risk wiping a record for a photo that's still really there. The live
+  // image stream above updates the UI on its own once this succeeds; no
+  // local list mutation needed here.
+  Future<void> removeBrokenImage(String imageId) async {
+    try {
+      await _apiService.deleteImageRecord(imageId);
+    } catch (e) {
+      debugPrint('removeBrokenImage failed for $imageId: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _deviceSub?.cancel();
+    _latestReadingSub?.cancel();
+    _historicalSub?.cancel();
+    _imagesSub?.cancel();
+    _tickTimer?.cancel();
+    super.dispose();
   }
 
   void setTablePage(int page) {
@@ -232,7 +314,13 @@ class DeviceProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void updateDevice(Device updated) {
+  // Writes through to Firestore before updating local state — errors
+  // (e.g. permission-denied from firestore.rules for a non-administrator)
+  // propagate to the caller rather than being swallowed, since the old
+  // local-only-mutation version let a failed write look like it had
+  // succeeded.
+  Future<void> updateDevice(Device updated) async {
+    await _apiService.updateDeviceRecord(updated);
     final idx = _devices.indexWhere((d) => d.deviceId == updated.deviceId);
     if (idx != -1) {
       _devices[idx] = updated;
@@ -243,7 +331,8 @@ class DeviceProvider with ChangeNotifier {
     }
   }
 
-  void addDevice(Device newDev) {
+  Future<void> addDevice(Device newDev) async {
+    await _apiService.createDevice(newDev);
     _devices.add(newDev);
     notifyListeners();
     selectDevice(newDev.deviceId);

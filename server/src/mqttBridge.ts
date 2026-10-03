@@ -11,6 +11,14 @@
  * Uses its own client ID (not the device's) — connecting with the same
  * client ID as a currently-connected device would make the broker
  * disconnect one of the two connections (MQTT client IDs must be unique).
+ *
+ * Protocol defaults to WSS (MQTT over WebSocket Secure, effectively port
+ * 443), not raw MQTT/1883. Confirmed by direct TCP test: some networks
+ * (this one included) allow outbound 443 but block outbound 1883 outright
+ * — WSS reaches the exact same broker and topics, just over a transport
+ * far less likely to be firewalled. Set MQTT_PROTOCOL=mqtt to use raw
+ * MQTT/1883 instead, e.g. once this runs somewhere with unrestricted
+ * egress and you'd rather avoid the WebSocket framing overhead.
  */
 
 import mqtt from "mqtt";
@@ -20,14 +28,17 @@ export function startMqttBridge(): void {
   const host = process.env.MQTT_HOST;
   if (!host) return;
 
-  const port = Number(process.env.MQTT_PORT) || 1883;
+  const protocol = (process.env.MQTT_PROTOCOL || "wss") as "wss" | "mqtt";
+  const port = Number(process.env.MQTT_PORT) || (protocol === "wss" ? 443 : 1883);
+  const wsPath = process.env.MQTT_WS_PATH || "/mqtt";
   const topicFilter = process.env.MQTT_TOPIC_FILTER || "evaratech/v1/+/telemetry";
   const clientId = `evaraflow-server-bridge-${Math.random().toString(16).slice(2, 10)}`;
 
   const client = mqtt.connect({
     host,
     port,
-    protocol: "mqtt",
+    protocol,
+    path: protocol === "wss" ? wsPath : undefined,
     clientId,
     username: process.env.MQTT_USERNAME,
     password: process.env.MQTT_PASSWORD,
@@ -35,7 +46,9 @@ export function startMqttBridge(): void {
   });
 
   client.on("connect", () => {
-    console.log(`mqttBridge connected to ${host}:${port} as ${clientId}`);
+    console.log(
+      `mqttBridge connected to ${protocol}://${host}:${port}${protocol === "wss" ? wsPath : ""} as ${clientId}`
+    );
     client.subscribe(topicFilter, (err) => {
       if (err) {
         console.error(`mqttBridge failed to subscribe to ${topicFilter}`, err);

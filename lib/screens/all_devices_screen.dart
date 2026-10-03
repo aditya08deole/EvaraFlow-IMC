@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
 import '../models/device.dart';
+import '../services/api_service.dart';
 import '../widgets/add_edit_device_dialog.dart';
+import '../theme/app_shapes.dart';
 import '../theme/app_theme.dart';
 
 class AllDevicesScreen extends StatefulWidget {
@@ -18,14 +21,42 @@ class _AllDevicesScreenState extends State<AllDevicesScreen> {
   String _search = '';
   String _statusFilter = 'all';
 
+  final ApiService _apiService = ApiService();
+  bool _isDataQualityExpanded = false;
+  List<Map<String, dynamic>> _deadLetters = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeadLetters();
+  }
+
+  Future<void> _loadDeadLetters() async {
+    try {
+      final items = await _apiService.getRecentDeadLetters();
+      if (!mounted) return;
+      setState(() => _deadLetters = items);
+    } catch (e) {
+      // A non-administrator's query is correctly rejected by
+      // firestore.rules — treat that the same as "nothing to show" rather
+      // than surfacing a Firestore permission error in this list.
+    }
+  }
+
   void _openAddDialog(BuildContext context, DeviceProvider provider) async {
-    final newDev = await showDialog<Device>(
+    final result = await showDialog<DeviceFormResult>(
       context: context,
       barrierColor: AppColors.textPrimary.withValues(alpha: 0.12),
       builder: (ctx) => const AddEditDeviceDialog(),
     );
-    if (newDev != null) {
-      provider.addDevice(newDev);
+    if (result == null) return;
+    try {
+      await provider.addDevice(result.device);
+      if (!context.mounted) return;
+      await _maybeStartBackfill(context, result);
+    } catch (e) {
+      if (!context.mounted) return;
+      _showSaveError(context, e);
     }
   }
 
@@ -34,14 +65,59 @@ class _AllDevicesScreenState extends State<AllDevicesScreen> {
     DeviceProvider provider,
     Device dev,
   ) async {
-    final updated = await showDialog<Device>(
+    final result = await showDialog<DeviceFormResult>(
       context: context,
       barrierColor: AppColors.textPrimary.withValues(alpha: 0.12),
       builder: (ctx) => AddEditDeviceDialog(initialDevice: dev),
     );
-    if (updated != null) {
-      provider.updateDevice(updated);
+    if (result == null) return;
+    try {
+      await provider.updateDevice(result.device);
+      if (!context.mounted) return;
+      await _maybeStartBackfill(context, result);
+    } catch (e) {
+      if (!context.mounted) return;
+      _showSaveError(context, e);
     }
+  }
+
+  Future<void> _maybeStartBackfill(
+    BuildContext context,
+    DeviceFormResult result,
+  ) async {
+    if (result.driveFolderId == null) return;
+    try {
+      await _apiService.startDriveBackfill(
+        result.driveFolderId!,
+        result.device.deviceId,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Drive backfill started in the background — the gallery will '
+            'fill in over the next few minutes for a large folder.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Device saved, but the Drive backfill failed to start: $e'),
+          backgroundColor: AppColors.dangerRed,
+        ),
+      );
+    }
+  }
+
+  void _showSaveError(BuildContext context, Object error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Could not save device: $error'),
+        backgroundColor: AppColors.dangerRed,
+      ),
+    );
   }
 
   @override
@@ -281,6 +357,143 @@ class _AllDevicesScreenState extends State<AllDevicesScreen> {
               ),
             ),
           ),
+
+          // Data Quality: rejected/anomalous ingestion events
+          // (deadLetters). Empty for a non-administrator (the query is
+          // rejected by firestore.rules) and for an administrator with
+          // nothing currently flagged — both render as "show nothing"
+          // rather than an always-present-but-empty section.
+          if (_deadLetters.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SurfaceCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              child: Column(
+                children: [
+                  InkWell(
+                    onTap: () => setState(
+                      () => _isDataQualityExpanded = !_isDataQualityExpanded,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(7),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.warningAmber.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.rule_folder_outlined,
+                                  size: 15,
+                                  color: AppColors.warningAmber,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Data Quality — Rejected Readings (${_deadLetters.length})',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Icon(
+                            _isDataQualityExpanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            color: AppColors.textSecondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_isDataQualityExpanded) ...[
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 220),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _deadLetters.length,
+                        separatorBuilder: (ctx, i) =>
+                            const Divider(color: AppColors.glassBorder),
+                        itemBuilder: (ctx, i) {
+                          final dl = _deadLetters[i];
+                          final createdAt = dl['createdAt'] as DateTime?;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.glassSurface,
+                                        borderRadius: BorderRadius.circular(
+                                          AppShapes.radiusXs,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        '${dl['source']}',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.cyanAccent,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    if (createdAt != null)
+                                      Text(
+                                        DateFormat(
+                                          'yyyy-MM-dd HH:mm:ss',
+                                        ).format(createdAt),
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${dl['reason']}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

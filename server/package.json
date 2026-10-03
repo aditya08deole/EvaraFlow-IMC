@@ -12,7 +12,8 @@
     "test": "tsc && node --test \"dist/__tests__/**/*.test.js\"",
     "seed:device": "node dist/scripts/seedDevice.js",
     "claims:set": "node dist/scripts/setUserClaims.js",
-    "backfill:drive": "node dist/scripts/backfillDriveImages.js"
+    "backfill:drive": "node dist/scripts/backfillDriveImages.js",
+    "prune:drive": "node dist/scripts/pruneDeletedDriveImages.js"
   },
   "dependencies": {
     "dotenv": "^18.0.5",

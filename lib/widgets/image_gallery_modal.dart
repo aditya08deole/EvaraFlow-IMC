@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../models/image_record.dart';
 import '../models/device.dart';
+import '../providers/device_provider.dart';
 import '../theme/app_shapes.dart';
 import '../theme/app_theme.dart';
 
 class ImageGalleryModal extends StatefulWidget {
   final Device device;
-  final List<ImageRecord> images;
   final ImageRecord? initialSelectedImage;
+  final ValueChanged<ImageRecord> onImageBroken;
 
   const ImageGalleryModal({
     super.key,
     required this.device,
-    required this.images,
     this.initialSelectedImage,
+    required this.onImageBroken,
   });
 
   @override
@@ -23,51 +25,39 @@ class ImageGalleryModal extends StatefulWidget {
 
 class _ImageGalleryModalState extends State<ImageGalleryModal> {
   ImageRecord? _activeLightboxImage;
-  int _activeImageIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    if (widget.initialSelectedImage != null) {
-      _activeLightboxImage = widget.initialSelectedImage;
-      _activeImageIndex = widget.images.indexOf(widget.initialSelectedImage!);
-    }
+    _activeLightboxImage = widget.initialSelectedImage;
   }
 
-  void _openLightbox(ImageRecord img, int index) {
-    setState(() {
-      _activeLightboxImage = img;
-      _activeImageIndex = index;
-    });
+  void _openLightbox(ImageRecord img) {
+    setState(() => _activeLightboxImage = img);
   }
 
   void _closeLightbox() {
-    setState(() {
-      _activeLightboxImage = null;
-    });
-  }
-
-  void _nextImage() {
-    if (_activeImageIndex < widget.images.length - 1) {
-      setState(() {
-        _activeImageIndex++;
-        _activeLightboxImage = widget.images[_activeImageIndex];
-      });
-    }
-  }
-
-  void _previousImage() {
-    if (_activeImageIndex > 0) {
-      setState(() {
-        _activeImageIndex--;
-        _activeLightboxImage = widget.images[_activeImageIndex];
-      });
-    }
+    setState(() => _activeLightboxImage = null);
   }
 
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
+    // Read live from the provider on every build instead of a frozen list
+    // passed in once at dialog-open time. A plain constructor parameter
+    // would freeze at whatever the live Firestore stream had delivered
+    // the instant this dialog opened — missing anything that arrives
+    // after (the stream still catching up, a backfill still running) —
+    // with no way to show it without closing and reopening the dialog.
+    final images = context.watch<DeviceProvider>().deviceImages;
+
+    // Derived fresh every build from the live list + whichever image is
+    // currently open, rather than cached in a field — a cached index
+    // would point at the wrong photo (or crash) the moment the live list
+    // reorders or changes length underneath it.
+    final activeIndex = _activeLightboxImage == null
+        ? -1
+        : images.indexOf(_activeLightboxImage!);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -118,7 +108,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                             ),
                           ),
                           child: Text(
-                            '${widget.images.length} Photos (Google Drive)',
+                            '${images.length} Photos (Google Drive)',
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppColors.driveBlue,
@@ -142,9 +132,9 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
 
               // Modal Body: Grid view or Lightbox
               Expanded(
-                child: _activeLightboxImage != null
-                    ? _buildLightboxView(dateFormat)
-                    : _buildGridView(dateFormat),
+                child: _activeLightboxImage != null && activeIndex != -1
+                    ? _buildLightboxView(dateFormat, images, activeIndex)
+                    : _buildGridView(dateFormat, images),
               ),
             ],
           ),
@@ -153,8 +143,8 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
     );
   }
 
-  Widget _buildGridView(DateFormat dateFormat) {
-    if (widget.images.isEmpty) {
+  Widget _buildGridView(DateFormat dateFormat, List<ImageRecord> images) {
+    if (images.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -191,11 +181,11 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
         mainAxisSpacing: 12,
         childAspectRatio: 1.2,
       ),
-      itemCount: widget.images.length,
+      itemCount: images.length,
       itemBuilder: (context, index) {
-        final img = widget.images[index];
+        final img = images[index];
         return GestureDetector(
-          onTap: () => _openLightbox(img, index),
+          onTap: () => _openLightbox(img),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppShapes.radiusXs),
@@ -207,7 +197,32 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.network(img.storageUrl, fit: BoxFit.cover),
+                  Image.network(
+                    img.storageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Could mean deleted from Drive, or just as easily a
+                      // transient throttle from lh3.googleusercontent.com
+                      // (unofficial hotlinking, not a supported API) —
+                      // those look identical here, so this never deletes
+                      // on its own. The small button lets an administrator
+                      // confirm removal only after actually checking Drive.
+                      return Container(
+                        color: AppColors.glassSurface,
+                        child: Center(
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.textMuted,
+                              size: 18,
+                            ),
+                            tooltip: 'Image unavailable — remove if deleted from Drive',
+                            onPressed: () => widget.onImageBroken(img),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -237,8 +252,12 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
     );
   }
 
-  Widget _buildLightboxView(DateFormat dateFormat) {
-    final img = _activeLightboxImage!;
+  Widget _buildLightboxView(
+    DateFormat dateFormat,
+    List<ImageRecord> images,
+    int activeIndex,
+  ) {
+    final img = images[activeIndex];
 
     return Stack(
       children: [
@@ -259,7 +278,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                     ),
                   ),
                   Text(
-                    '${_activeImageIndex + 1} of ${widget.images.length}',
+                    '${activeIndex + 1} of ${images.length}',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -276,7 +295,37 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                 padding: const EdgeInsets.all(12),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.network(img.storageUrl, fit: BoxFit.contain),
+                  child: Image.network(
+                    img.storageUrl,
+                    fit: BoxFit.contain,
+                    // See the grid cell's errorBuilder above — never
+                    // auto-deletes, since a load failure here can't be
+                    // told apart from a transient lh3.googleusercontent.com
+                    // throttle.
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.broken_image_outlined,
+                              color: AppColors.textMuted,
+                              size: 48,
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Image unavailable',
+                              style: TextStyle(color: AppColors.textMuted),
+                            ),
+                            TextButton(
+                              onPressed: () => widget.onImageBroken(img),
+                              child: const Text('Remove if deleted from Drive'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -326,7 +375,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
         ),
 
         // Navigation Arrows
-        if (_activeImageIndex > 0)
+        if (activeIndex > 0)
           Positioned(
             left: 10,
             top: 250,
@@ -334,12 +383,12 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
               backgroundColor: Colors.black.withValues(alpha: 0.6),
               child: IconButton(
                 icon: const Icon(Icons.chevron_left, color: Colors.white),
-                onPressed: _previousImage,
+                onPressed: () => _openLightbox(images[activeIndex - 1]),
               ),
             ),
           ),
 
-        if (_activeImageIndex < widget.images.length - 1)
+        if (activeIndex < images.length - 1)
           Positioned(
             right: 10,
             top: 250,
@@ -347,7 +396,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
               backgroundColor: Colors.black.withValues(alpha: 0.6),
               child: IconButton(
                 icon: const Icon(Icons.chevron_right, color: Colors.white),
-                onPressed: _nextImage,
+                onPressed: () => _openLightbox(images[activeIndex + 1]),
               ),
             ),
           ),

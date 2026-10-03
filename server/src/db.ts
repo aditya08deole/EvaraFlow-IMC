@@ -24,6 +24,21 @@ export interface DeviceRef {
   orgId: string;
   deviceId: string;
   expectedIntervalSeconds: number;
+  // Last accepted reading's values, if any — read off the device doc so
+  // processTelemetryMessage can plausibility-check an incoming reading
+  // (TR-5.1: a real totalizer only ever counts up) without a second query.
+  lastFlowLpm: number | null;
+  lastTotalL: number | null;
+  // Needed to compute an implied rate for an upward totalizer jump (see
+  // ingestTelemetry.ts) — a jump is only plausible relative to how much
+  // time actually passed since the last accepted reading.
+  lastSeenAt: Date | null;
+  // Tracks a lower total_liters value that's been rejected once as a
+  // possible decrease, so a second consistent sighting of the same value
+  // can be trusted as a genuine reset/meter replacement rather than
+  // noise — see recordPendingLowerTotal and ingestTelemetry.ts.
+  pendingLowerTotal: number | null;
+  pendingLowerCount: number;
 }
 
 const db = () => getFirestore();
@@ -46,12 +61,38 @@ export async function findDeviceByNodeId(
     .get();
   if (!deviceDoc.exists) return null;
 
+  const data = deviceDoc.data();
   return {
     orgId,
     deviceId: nodeId,
     expectedIntervalSeconds:
-      (deviceDoc.data()?.expectedIntervalSeconds as number | undefined) ?? 300,
+      (data?.expectedIntervalSeconds as number | undefined) ?? 300,
+    lastFlowLpm: (data?.lastFlowLpm as number | undefined) ?? null,
+    lastTotalL: (data?.lastTotalL as number | undefined) ?? null,
+    lastSeenAt:
+      (data?.lastSeenAt as { toDate?: () => Date } | undefined)?.toDate?.() ?? null,
+    pendingLowerTotal: (data?.pendingLowerTotal as number | undefined) ?? null,
+    pendingLowerCount: (data?.pendingLowerCount as number | undefined) ?? 0,
   };
+}
+
+/**
+ * Remembers a rejected-as-decrease total_liters value and how many times
+ * it's been seen in a row, so ingestTelemetry.ts can tell a genuine reset
+ * (the same lower value repeating) apart from a one-off glitch (a
+ * different, unrelated lower value each time).
+ */
+export async function recordPendingLowerTotal(
+  device: DeviceRef,
+  candidateTotal: number,
+  count: number
+): Promise<void> {
+  await db()
+    .collection("organizations")
+    .doc(device.orgId)
+    .collection("devices")
+    .doc(device.deviceId)
+    .update({ pendingLowerTotal: candidateTotal, pendingLowerCount: count });
 }
 
 /**
@@ -101,7 +142,21 @@ export async function insertReading(
       // "ok" by construction.
       raw: fields.raw,
     });
-    tx.update(deviceRef, { lastSeenAt: now });
+    // Remembered so the next reading can be plausibility-checked against
+    // it (see ingestTelemetry.ts) — only overwritten when this reading
+    // actually carried that field, so a flow-only packet never wipes out
+    // the last known totalizer value (or vice versa).
+    const deviceUpdate: Record<string, unknown> = {
+      lastSeenAt: now,
+      // Any accepted reading means the baseline just moved (up, or via a
+      // confirmed reset — see recordPendingLowerTotal), so whatever was
+      // pending before is no longer relevant.
+      pendingLowerTotal: null,
+      pendingLowerCount: 0,
+    };
+    if (fields.flowLpm !== null) deviceUpdate.lastFlowLpm = fields.flowLpm;
+    if (fields.totalL !== null) deviceUpdate.lastTotalL = fields.totalL;
+    tx.update(deviceRef, deviceUpdate);
   });
 }
 

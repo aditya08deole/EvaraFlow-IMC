@@ -188,6 +188,8 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
               child: Padding(
                 padding: const EdgeInsets.only(right: 10, top: 8),
                 child: LineChart(
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeOutCubic,
                   LineChartData(
                     // fl_chart auto-computes axis bounds from the data when
                     // minY/maxY/minX/maxX aren't given — with only one or
@@ -280,25 +282,40 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
                           return FlSpot(e.key.toDouble(), yVal);
                         }).toList(),
                         isCurved: true,
-                        curveSmoothness: 0.35,
+                        curveSmoothness: 0.3,
+                        preventCurveOverShooting: true,
                         gradient: lineGradient,
-                        barWidth: 2.5,
+                        barWidth: 3,
                         isStrokeCapRound: true,
+                        shadow: Shadow(
+                          color: accentColor.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                        ),
+                        // A single real reading (common right after a
+                        // device's first telemetry) still deserves a
+                        // deliberate, legible marker rather than reading as
+                        // a rendering glitch — dots stay visible up to a
+                        // reasonably dense series, with a bit more size and
+                        // a soft halo ring than a pure data-density display
+                        // would use.
                         dotData: FlDotData(
                           show: widget.readings.length < 24,
-                          getDotPainter: (spot, percent, barData, index) =>
-                              FlDotCirclePainter(
-                                radius: 3,
-                                color: accentColor,
-                                strokeWidth: 1.5,
-                                strokeColor: Colors.white,
-                              ),
+                          getDotPainter: (spot, percent, barData, index) {
+                            final isLatest =
+                                index == widget.readings.length - 1;
+                            return FlDotCirclePainter(
+                              radius: isLatest ? 5.5 : 4,
+                              color: accentColor,
+                              strokeWidth: isLatest ? 2.5 : 1.5,
+                              strokeColor: Colors.white,
+                            );
+                          },
                         ),
                         belowBarData: BarAreaData(
                           show: true,
                           gradient: LinearGradient(
                             colors: [
-                              accentColor.withValues(alpha: 0.20),
+                              accentColor.withValues(alpha: 0.28),
                               accentColor.withValues(alpha: 0.0),
                             ],
                             begin: Alignment.topCenter,
@@ -308,7 +325,36 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
                       ),
                     ],
                     lineTouchData: LineTouchData(
+                      getTouchedSpotIndicator: (barData, spotIndexes) {
+                        return spotIndexes.map((_) {
+                          return TouchedSpotIndicatorData(
+                            FlLine(
+                              color: accentColor.withValues(alpha: 0.4),
+                              strokeWidth: 1.5,
+                              dashArray: [4, 4],
+                            ),
+                            FlDotData(
+                              getDotPainter: (spot, percent, bar, index) =>
+                                  FlDotCirclePainter(
+                                    radius: 6,
+                                    color: accentColor,
+                                    strokeWidth: 2.5,
+                                    strokeColor: Colors.white,
+                                  ),
+                            ),
+                          );
+                        }).toList();
+                      },
                       touchTooltipData: LineTouchTooltipData(
+                        tooltipRoundedRadius: 10,
+                        tooltipPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        fitInsideHorizontally: true,
+                        fitInsideVertically: true,
+                        getTooltipColor: (_) =>
+                            AppColors.textPrimary.withValues(alpha: 0.92),
                         getTooltipItems: (touchedSpots) {
                           return touchedSpots.map((spot) {
                             final idx = spot.spotIndex;
