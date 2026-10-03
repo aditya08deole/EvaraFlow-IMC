@@ -7,9 +7,12 @@
  * Variables tab — it must never be committed to the repo or pasted
  * anywhere outside that UI.
  *
- * Only used for Firestore here — demo scope has no Firebase Storage bucket
- * (see drive.ts, which links to Drive-hosted images directly instead of
- * caching them).
+ * Used for Firestore throughout. Also used for Firebase Storage, but only
+ * by the Tailscale image pipeline (tailscale.ts) — Drive images still never
+ * touch Storage (see drive.ts, which links to Drive-hosted images directly
+ * instead of caching them). Storage needs FIREBASE_STORAGE_BUCKET passed
+ * explicitly per call (getStorage().bucket(name)) since initializeApp()
+ * below doesn't set a default bucket.
  */
 
 import { cert, initializeApp, type ServiceAccount } from "firebase-admin/app";

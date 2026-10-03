@@ -25,17 +25,19 @@
  * there's no Drive-style file id for this source, and the filename is
  * already unique per node+timestamp.
  *
- * Reachability (user's explicit choice, not assumed): this only needs to
- * work for viewers on the same Tailscale network as the Flask server, so
- * the stored URL is a plain tailnet address (tailscale.ts), not a Tailscale
- * Funnel/public URL. If that ever needs to change, it's a URL-building
- * change in tailscale.ts only — this route and the Firestore schema don't
- * need to know.
+ * Reachability: originally scoped to tailnet-only viewers, per the user's
+ * first answer. Revised the same day once the user confirmed the
+ * dashboard also needs to work for viewers off that network — this now
+ * fetches the actual bytes over Tailscale and re-hosts them in Firebase
+ * Storage (tailscale.ts) rather than storing a tailnet-only URL. If that
+ * fetch fails (the Flask server or this backend's own tailnet access is
+ * down), the image is dead-lettered with the real error rather than
+ * silently dropped or crashing the request.
  */
 
 import type { Request, Response } from "express";
 import { deadLetter, findDeviceByNodeId, imageExists, insertImage } from "../db";
-import { tailscaleImageUrls } from "../tailscale";
+import { fetchAndStoreTailscaleImage } from "../tailscale";
 import { FILENAME_RE, parseCapturedAt } from "./ingestDriveImage";
 
 export async function ingestTailscaleImageHandler(
@@ -90,7 +92,26 @@ export async function ingestTailscaleImageHandler(
     // Same as Drive: an unknown device still gets the image filed, as
     // Unassigned (TR-10), not dropped.
 
-    const { storageUrl, thumbUrl } = tailscaleImageUrls(node_id, filename);
+    let storageUrl: string;
+    let thumbUrl: string;
+    try {
+      ({ storageUrl, thumbUrl } = await fetchAndStoreTailscaleImage(node_id, filename));
+    } catch (err) {
+      // Deliberately not the outer catch's 500: this is an expected-ish
+      // failure mode (the Flask server or this backend's tailnet access
+      // being temporarily down), not a Firestore/infra failure, so it's
+      // dead-lettered with the real reason instead of crashing the
+      // request — same spirit as every other rejection in this file.
+      await deadLetter(
+        "tailscale",
+        { node_id, filename },
+        `could not fetch/store image from Tailscale server: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      res.sendStatus(200);
+      return;
+    }
 
     await insertImage({
       orgId: device?.orgId ?? null,

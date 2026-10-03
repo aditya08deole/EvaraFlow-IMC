@@ -50,11 +50,15 @@ Drive. No Firebase Storage bucket is used.
   this repo): right after it saves a file to `images_s/<node_id>/<filename>`,
   it should POST `{ node_id, filename }` to
   `https://<your-railway-domain>/ingest/tailscale-image`, header
-  `X-Webhook-Secret: <TAILSCALE_WEBHOOK_SECRET value>`. Also requires
-  `TAILSCALE_IMAGE_BASE_URL` (that Flask server's tailnet address) set on
-  this service — see `.env.example`. Only works for dashboard viewers on
-  the same Tailscale network as that server (no Funnel/public exposure);
-  see EVARAFLOW_GROUND_TRUTH.md D-018.
+  `X-Webhook-Secret: <TAILSCALE_WEBHOOK_SECRET value>`. This service then
+  fetches the photo's bytes from `TAILSCALE_IMAGE_BASE_URL` (that Flask
+  server's tailnet address) and re-hosts them in `FIREBASE_STORAGE_BUCKET`,
+  so dashboard viewers don't need to be on that tailnet themselves — **this
+  service** does, though, to fetch the bytes in the first place. Works as
+  long as this runs locally on the same tailnet as `server_v3.py`; if this
+  is ever deployed to Railway, Railway's container needs its own Tailscale
+  access (e.g. a sidecar) for this pipeline to keep working. See
+  EVARAFLOW_GROUND_TRUTH.md D-018.
 
 ## CI/CD
 
