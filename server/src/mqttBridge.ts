@@ -19,10 +19,44 @@
  * far less likely to be firewalled. Set MQTT_PROTOCOL=mqtt to use raw
  * MQTT/1883 instead, e.g. once this runs somewhere with unrestricted
  * egress and you'd rather avoid the WebSocket framing overhead.
+ *
+ * Retained messages (packet.retain) are never passed to
+ * processTelemetryMessage. Confirmed necessary by real traffic: a single
+ * frozen reading (node_id "rpitest", a fixed total_liters value) kept
+ * reappearing identically every time this bridge reconnected — exactly
+ * what a RETAIN-flagged publish looks like, since the broker replays the
+ * last retained message on every fresh subscribe. Trusting it as live
+ * data made the pending-lower-total confirmation logic in
+ * ingestTelemetry.ts eventually accept this stale snapshot as a genuine
+ * reset, since the same value really was "repeating" — just not live.
  */
 
 import mqtt from "mqtt";
 import { processTelemetryMessage } from "./routes/ingestTelemetry";
+import { deadLetter } from "./db";
+
+/**
+ * Factored out of the `client.on("message", ...)` callback so the
+ * retain-skip behavior can be unit tested directly (see
+ * __tests__/mqttBridge.test.ts) without standing up a real `mqtt.connect()`
+ * client just to synthesize a message event.
+ */
+export function handleMqttMessage(
+  topic: string,
+  payloadBuf: Buffer,
+  packet: { retain: boolean }
+): void {
+  const payload = payloadBuf.toString("utf8");
+  if (packet.retain) {
+    deadLetter("mqtt", { topic, payload }, "retained message replay, not live telemetry — ignored").catch(
+      (err) => console.error(`mqttBridge failed to dead-letter retained message on ${topic}`, err)
+    );
+    return;
+  }
+  processTelemetryMessage(topic, payload).catch((err) => {
+    console.error(`mqttBridge failed to process message on ${topic}`, err);
+  });
+}
 
 export function startMqttBridge(): void {
   const host = process.env.MQTT_HOST;
@@ -58,11 +92,7 @@ export function startMqttBridge(): void {
     });
   });
 
-  client.on("message", (topic, payloadBuf) => {
-    processTelemetryMessage(topic, payloadBuf.toString("utf8")).catch((err) => {
-      console.error(`mqttBridge failed to process message on ${topic}`, err);
-    });
-  });
+  client.on("message", handleMqttMessage);
 
   client.on("error", (err) => {
     console.error("mqttBridge connection error", err);
