@@ -13,18 +13,24 @@
  *
  * Deliberately NOT a historical backfill: that server's `/list` returned
  * 42,689 images across 6 nodes going back to at least April 2026 the
- * first time this was checked (2026-10-04) — downloading and re-hosting
- * all of that automatically on first boot would be a large, surprising,
- * costly action nobody asked for. POLL_CUTOFF is fixed at module load
- * time, so only images captured from the moment this backend started
- * polling onward are ever considered; the historical backlog is left
- * alone unless a separate, deliberate backfill script is written and run
- * on purpose (mirroring driveBackfill.ts's one-off pattern) — not yet
+ * first time this was checked (2026-10-04) — indexing all of that
+ * automatically on first boot would flood the gallery with a huge,
+ * surprising amount of history nobody asked for. POLL_CUTOFF is fixed at
+ * module load time, so only images captured from the moment this backend
+ * started polling onward are ever considered; the historical backlog is
+ * left alone unless a separate, deliberate backfill script is written and
+ * run on purpose (mirroring driveBackfill.ts's one-off pattern) — not yet
  * built, since nobody's asked for the historical photos yet.
+ *
+ * Only indexes a Firestore `images` doc per new file — it never fetches
+ * the actual image bytes itself. That happens lazily, per view, in
+ * tailscaleImageProxy.ts (see tailscale.ts for why: Firebase Storage
+ * would need the paid Blaze plan, which the user explicitly doesn't
+ * want).
  */
 
-import { deadLetter, findDeviceByNodeId, imageExists, insertImage } from "./db";
-import { fetchAndStoreTailscaleImage } from "./tailscale";
+import { findDeviceByNodeId, imageExists, insertImage } from "./db";
+import { tailscaleProxyUrls } from "./tailscale";
 import { FILENAME_RE, parseCapturedAt } from "./routes/ingestDriveImage";
 
 const POLL_CUTOFF = new Date();
@@ -36,7 +42,7 @@ interface ListResponse {
 
 export async function pollTailscaleImages(): Promise<void> {
   const base = process.env.TAILSCALE_IMAGE_BASE_URL;
-  if (!base) return;
+  if (!base || !process.env.PUBLIC_BASE_URL) return;
 
   let listed: ListResponse;
   try {
@@ -61,30 +67,22 @@ export async function pollTailscaleImages(): Promise<void> {
       const capturedAt = parseCapturedAt(dateStr, timeStr);
       if (!capturedAt || new Date(capturedAt) <= POLL_CUTOFF) continue; // historical — not this poller's job
 
-      try {
-        if (await imageExists(filename)) continue;
+      if (await imageExists(filename)) continue;
 
-        const device = await findDeviceByNodeId(nodeId);
-        const { storageUrl, thumbUrl } = await fetchAndStoreTailscaleImage(nodeId, filename);
+      const device = await findDeviceByNodeId(nodeId);
+      const { storageUrl, thumbUrl } = tailscaleProxyUrls(nodeId, filename);
 
-        await insertImage({
-          orgId: device?.orgId ?? null,
-          deviceId: device?.deviceId ?? null,
-          driveFileId: filename,
-          fileName: filename,
-          capturedAt,
-          thumbUrl,
-          storageUrl,
-          source: "tailscale",
-        });
-        console.log(`tailscalePoll: ingested ${nodeId}/${filename}`);
-      } catch (err) {
-        await deadLetter(
-          "tailscale",
-          { node_id: nodeId, filename },
-          `poll could not fetch/store image: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
+      await insertImage({
+        orgId: device?.orgId ?? null,
+        deviceId: device?.deviceId ?? null,
+        driveFileId: filename,
+        fileName: filename,
+        capturedAt,
+        thumbUrl,
+        storageUrl,
+        source: "tailscale",
+      });
+      console.log(`tailscalePoll: indexed ${nodeId}/${filename}`);
     }
   }
 }

@@ -1,10 +1,9 @@
 /**
  * Unit tests for routes/ingestTailscaleImage.ts — same mocking approach as
  * ingestDriveImage.test.ts (../db monkey-patched per test, no real
- * Firestore call). ../tailscale DOES need mocking here, unlike ../drive:
- * fetchAndStoreTailscaleImage makes a real network fetch and a real
- * Storage upload, so every test below replaces it rather than letting it
- * run for real.
+ * Firestore call). ../tailscale needs no mocking: tailscaleProxyUrls just
+ * builds a URL string from PUBLIC_BASE_URL (set in _setupEnv.ts), no
+ * network call — same reason ../drive needs no mocking either.
  *
  * Filename shape matches server_v3.py's own
  * `"{}_{}.jpg".format(node_id, timestamp)` where
@@ -16,15 +15,12 @@ import "./_setupEnv";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as db from "../db";
-import * as tailscale from "../tailscale";
 import { ingestTailscaleImageHandler } from "../routes/ingestTailscaleImage";
 import { fakeReq, fakeRes } from "./_fakeHttp";
 
 const AUTH_HEADERS = { "X-Webhook-Secret": "test-tailscale-secret" };
 const DEVICE = { orgId: "org-001", deviceId: "EVT-EF-002", expectedIntervalSeconds: 300 };
 const REAL_FILENAME = "EVT-EF-002_20261002_153000.jpg";
-const FAKE_HOSTED_URL =
-  "https://storage.googleapis.com/test-bucket.appspot.com/tailscale-images/EVT-EF-002/EVT-EF-002_20261002_153000.jpg";
 
 test("rejects with 401 when X-Webhook-Secret is missing or wrong", async () => {
   const res = fakeRes();
@@ -96,10 +92,6 @@ test("files an image from an unknown device as Unassigned, not a dead letter", a
   const deadLetter = t.mock.method(db, "deadLetter", async () => {});
   t.mock.method(db, "imageExists", async () => false);
   t.mock.method(db, "findDeviceByNodeId", async () => null);
-  t.mock.method(tailscale, "fetchAndStoreTailscaleImage", async () => ({
-    storageUrl: FAKE_HOSTED_URL,
-    thumbUrl: FAKE_HOSTED_URL,
-  }));
   const insertImage = t.mock.method(db, "insertImage", async () => {});
 
   const res = fakeRes();
@@ -120,18 +112,17 @@ test("files an image from an unknown device as Unassigned, not a dead letter", a
   };
   assert.equal(fields.orgId, null);
   assert.equal(fields.deviceId, null);
-  assert.equal(fields.storageUrl, FAKE_HOSTED_URL);
+  assert.equal(
+    fields.storageUrl,
+    "http://test-backend.example.com/tailscale-images/EVT-UNKNOWN/EVT-UNKNOWN_20261002_153000.jpg"
+  );
 });
 
-test("indexes a valid image for a registered device with the re-hosted Storage URL, tagged source: tailscale", async (t) => {
+test("indexes a valid image for a registered device with this backend's own proxy URL, tagged source: tailscale", async (t) => {
   t.mock.method(db, "imageExists", async () => false);
   t.mock.method(db, "findDeviceByNodeId", async (nodeId: string) =>
     nodeId === DEVICE.deviceId ? DEVICE : null
   );
-  t.mock.method(tailscale, "fetchAndStoreTailscaleImage", async () => ({
-    storageUrl: FAKE_HOSTED_URL,
-    thumbUrl: FAKE_HOSTED_URL,
-  }));
   const insertImage = t.mock.method(db, "insertImage", async () => {});
 
   const res = fakeRes();
@@ -153,48 +144,19 @@ test("indexes a valid image for a registered device with the re-hosted Storage U
     source: string;
     driveFileId: string;
   };
+  const expectedUrl = `http://test-backend.example.com/tailscale-images/EVT-EF-002/${REAL_FILENAME}`;
   assert.equal(fields.orgId, "org-001");
   assert.equal(fields.deviceId, "EVT-EF-002");
   assert.equal(fields.capturedAt, "2026-10-02T15:30:00Z");
-  assert.equal(fields.storageUrl, FAKE_HOSTED_URL);
-  assert.equal(fields.thumbUrl, FAKE_HOSTED_URL);
+  assert.equal(fields.storageUrl, expectedUrl);
+  assert.equal(fields.thumbUrl, expectedUrl);
   assert.equal(fields.source, "tailscale");
   assert.equal(fields.driveFileId, REAL_FILENAME);
-});
-
-test("dead-letters (200, not 500) when fetching/storing from the Tailscale server fails", async (t) => {
-  const deadLetter = t.mock.method(db, "deadLetter", async () => {});
-  t.mock.method(db, "imageExists", async () => false);
-  t.mock.method(db, "findDeviceByNodeId", async () => DEVICE);
-  const insertImage = t.mock.method(db, "insertImage", async () => {});
-  t.mock.method(tailscale, "fetchAndStoreTailscaleImage", async () => {
-    throw new Error("fetching http://laptop:5000/images/... returned 404 Not Found");
-  });
-
-  const res = fakeRes();
-  await ingestTailscaleImageHandler(
-    fakeReq({
-      body: { node_id: "EVT-EF-002", filename: REAL_FILENAME },
-      headers: AUTH_HEADERS,
-    }),
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(insertImage.mock.callCount(), 0);
-  assert.match(
-    deadLetter.mock.calls[0].arguments[2] as string,
-    /could not fetch\/store image.*404 Not Found/
-  );
 });
 
 test("returns 500 (not a crash) when the Firestore insert throws", async (t) => {
   t.mock.method(db, "imageExists", async () => false);
   t.mock.method(db, "findDeviceByNodeId", async () => DEVICE);
-  t.mock.method(tailscale, "fetchAndStoreTailscaleImage", async () => ({
-    storageUrl: FAKE_HOSTED_URL,
-    thumbUrl: FAKE_HOSTED_URL,
-  }));
   t.mock.method(db, "insertImage", async () => {
     throw new Error("Firestore unavailable");
   });

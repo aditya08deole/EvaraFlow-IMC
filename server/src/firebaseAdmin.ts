@@ -7,12 +7,13 @@
  * Variables tab — it must never be committed to the repo or pasted
  * anywhere outside that UI.
  *
- * Used for Firestore throughout. Also used for Firebase Storage, but only
- * by the Tailscale image pipeline (tailscale.ts) — Drive images still never
- * touch Storage (see drive.ts, which links to Drive-hosted images directly
- * instead of caching them). Storage needs FIREBASE_STORAGE_BUCKET passed
- * explicitly per call (getStorage().bucket(name)) since initializeApp()
- * below doesn't set a default bucket.
+ * Only used for Firestore here — no Firebase Storage bucket anywhere in
+ * this codebase. Drive images link to Drive-hosted images directly
+ * instead of caching them (see drive.ts); Tailscale images are proxied
+ * live instead of cached (see tailscale.ts) specifically because Cloud
+ * Storage for Firebase now requires the paid Blaze plan just to enable,
+ * which this project avoids on purpose (same reason D-013 moved compute
+ * off Cloud Functions).
  */
 
 import { cert, initializeApp, type ServiceAccount } from "firebase-admin/app";
