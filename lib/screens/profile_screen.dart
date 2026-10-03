@@ -1,13 +1,67 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../theme/app_shapes.dart';
 import '../theme/app_theme.dart';
 
-class ProfileScreen extends StatelessWidget {
+/// Previously showed an entirely invented identity ("Ops Admin",
+/// admin@evaratech.com, "org-evaratech-01", "5 Flow Meters") and invented
+/// security/alert settings claimed as "Enabled" (2FA, API token scopes,
+/// alert channels) for features that don't exist anywhere in this
+/// codebase — found during a pass looking for exactly this kind of thing.
+/// Identity/org/fleet count below are the real signed-in user and real
+/// Firestore data; the security/alerts cards are now labeled as what they
+/// actually are (not built yet) rather than claimed as active.
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  final ApiService _apiService = ApiService();
+  String? _orgId;
+  int? _deviceCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final orgId = await _apiService.currentOrgId();
+      final devices = await _apiService.getDevices();
+      if (mounted) {
+        setState(() {
+          _orgId = orgId;
+          _deviceCount = devices.length;
+        });
+      }
+    } catch (_) {
+      // No org_id claim set yet for this user — leave both as "—" rather
+      // than fabricating a value, per this project's own rule against
+      // presenting an assumption as fact.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName?.isNotEmpty == true
+        ? user!.displayName!
+        : (user?.email ?? 'Unknown user');
+    final initials = displayName.trim().isEmpty
+        ? '?'
+        : displayName
+              .trim()
+              .split(RegExp(r'\s+'))
+              .take(2)
+              .map((w) => w[0].toUpperCase())
+              .join();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -44,7 +98,7 @@ class ProfileScreen extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Manage user account, organizational permissions, and security credentials.',
+                        'Signed-in account and organization.',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppColors.textSecondary,
@@ -93,10 +147,10 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
-                      'EM',
-                      style: TextStyle(
+                      initials,
+                      style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -111,61 +165,23 @@ class ProfileScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text(
-                                'Ops Admin',
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'admin@evaratech.com',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
+                          Text(
+                            displayName,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.liveTealLight,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: AppColors.liveTeal.withValues(
-                                  alpha: 0.3,
-                                ),
-                              ),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(
-                                  Icons.verified_user_rounded,
-                                  size: 14,
-                                  color: AppColors.liveTeal,
-                                ),
-                                SizedBox(width: 6),
-                                Text(
-                                  'System Administrator',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.liveTeal,
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(height: 2),
+                          Text(
+                            user?.email ?? '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
                             ),
                           ),
                         ],
@@ -174,24 +190,18 @@ class ProfileScreen extends StatelessWidget {
                       const Divider(),
                       const SizedBox(height: 16),
 
-                      // Information Grid
+                      // Information Grid — real data only
                       Row(
                         children: [
                           _buildProfileInfoItem(
-                            'Organization',
-                            'EvaraFlow Industrial Systems',
-                            Icons.business_rounded,
-                          ),
-                          const SizedBox(width: 24),
-                          _buildProfileInfoItem(
                             'Organization ID',
-                            'org-evaratech-01',
+                            _orgId ?? '—',
                             Icons.tag_rounded,
                           ),
                           const SizedBox(width: 24),
                           _buildProfileInfoItem(
-                            'Assigned Fleet',
-                            '5 Flow Meters',
+                            'Registered Devices',
+                            _deviceCount != null ? '$_deviceCount' : '—',
                             Icons.sensors_rounded,
                           ),
                         ],
@@ -204,107 +214,40 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Secondary Cards Grid (Security & Preferences)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Security & Authentication Card
-              Expanded(
-                child: SurfaceCard(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: const [
-                          Icon(
-                            Icons.shield_outlined,
-                            size: 18,
-                            color: AppColors.primary,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Security & Access',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ],
+          // Honest placeholder — these aren't built yet anywhere in this
+          // codebase. Previously this card claimed 2FA/API tokens/sessions
+          // were "Enabled" with specific fake values; that was simply
+          // false, so it's labeled as not-yet-built instead.
+          SurfaceCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Icon(
+                      Icons.construction_outlined,
+                      size: 18,
+                      color: AppColors.textMuted,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Security, Sessions & Alert Preferences',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
                       ),
-                      const SizedBox(height: 14),
-                      _buildSecurityRow(
-                        'Two-Factor Auth (2FA)',
-                        'Enabled (Hardware Key)',
-                        true,
-                      ),
-                      const SizedBox(height: 10),
-                      _buildSecurityRow(
-                        'API Token Scopes',
-                        'Full Telemetry & Read/Write',
-                        true,
-                      ),
-                      const SizedBox(height: 10),
-                      _buildSecurityRow(
-                        'Session Duration',
-                        '8 Hours Auto-Renew',
-                        false,
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 16),
-
-              // Notification Preferences Card
-              Expanded(
-                child: SurfaceCard(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: const [
-                          Icon(
-                            Icons.notifications_active_outlined,
-                            size: 18,
-                            color: AppColors.liveTeal,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Alert Channels',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      _buildSecurityRow(
-                        'High-Flow Alerts',
-                        'Email & Push Active',
-                        true,
-                      ),
-                      const SizedBox(height: 10),
-                      _buildSecurityRow(
-                        'Meter Offline Threshold',
-                        'Immediate (300 seconds)',
-                        true,
-                      ),
-                      const SizedBox(height: 10),
-                      _buildSecurityRow(
-                        'Weekly Digest Report',
-                        'Delivered Mondays 8 AM',
-                        false,
-                      ),
-                    ],
-                  ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Not built in this version. Authentication is handled entirely by Firebase Auth; there is no 2FA, API token, or alert-channel management layer in this app yet (alert thresholds themselves are still a Proposed decision — EVARAFLOW_GROUND_TRUTH.md D-008).',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -352,38 +295,6 @@ class ProfileScreen extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildSecurityRow(String label, String value, bool isBadge) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: isBadge
-                ? AppColors.primaryLight
-                : AppColors.surfaceSecondary,
-            borderRadius: BorderRadius.circular(AppShapes.radiusXs),
-            border: Border.all(
-              color: isBadge ? AppColors.primaryBorder : AppColors.border,
-            ),
-          ),
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: isBadge ? AppColors.primary : AppColors.textSecondary,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

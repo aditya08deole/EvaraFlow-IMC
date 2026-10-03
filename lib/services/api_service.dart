@@ -99,6 +99,7 @@ class ApiService {
     'driveMatchKey': device.driveMatchKey,
     'expectedIntervalSeconds': device.expectedIntervalSeconds,
     'consumptionMethod': device.consumptionMethod.name,
+    'imageSource': device.imageSource.name,
     'isActive': device.isActive,
   };
 
@@ -154,6 +155,11 @@ class ApiService {
       consumptionMethod: data['consumptionMethod'] == 'integratedFlow'
           ? ConsumptionMethod.integratedFlow
           : ConsumptionMethod.totalizer,
+      imageSource: switch (data['imageSource'] as String?) {
+        'tailscale' => ImageSource.tailscale,
+        'drive' => ImageSource.drive,
+        _ => ImageSource.none,
+      },
       status: storedStatus,
       lastSeenAt: (data['lastSeenAt'] as Timestamp?)?.toDate(),
       isActive: data['isActive'] as bool? ?? true,
@@ -379,6 +385,14 @@ class ApiService {
   // of this collection to administrators, so a non-admin's query here
   // simply comes back empty rather than needing a separate client-side
   // role check.
+  // Exact total via Firestore's count() aggregation (a single small read,
+  // not downloading every document) — used by settings_screen.dart, which
+  // used to hardcode "(0)" regardless of the real number.
+  Future<int> getDeadLetterCount() async {
+    final agg = await _db.collection('deadLetters').count().get();
+    return agg.count ?? 0;
+  }
+
   Future<List<Map<String, dynamic>>> getRecentDeadLetters({
     int limit = 20,
   }) async {

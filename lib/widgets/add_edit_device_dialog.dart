@@ -57,6 +57,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
   late TextEditingController _mqttPasswordController;
   late TextEditingController _driveFolderController;
   ConsumptionMethod _consumptionMethod = ConsumptionMethod.totalizer;
+  ImageSource _imageSource = ImageSource.none;
   bool _obscurePassword = true;
   bool _isSubmitting = false;
   String? _driveFolderError;
@@ -94,6 +95,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
     _driveFolderController = TextEditingController();
     if (d != null) {
       _consumptionMethod = d.consumptionMethod;
+      _imageSource = d.imageSource;
     }
     // Redraws the derived-identity panel as the ID is typed.
     _idController.addListener(() => setState(() {}));
@@ -131,7 +133,9 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    final folderInput = _driveFolderController.text;
+    final folderInput = _imageSource == ImageSource.drive
+        ? _driveFolderController.text
+        : '';
     String? driveFolderId;
     if (folderInput.trim().isNotEmpty) {
       driveFolderId = extractDriveFolderId(folderInput);
@@ -160,6 +164,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
         driveMatchKey: _driveMatchKey,
         expectedIntervalSeconds: int.tryParse(_intervalController.text) ?? 300,
         consumptionMethod: _consumptionMethod,
+        imageSource: _imageSource,
         status: isEditing ? widget.initialDevice!.status : DeviceStatus.noData,
         lastSeenAt: widget.initialDevice?.lastSeenAt,
         firmwareVersion: widget.initialDevice?.firmwareVersion,
@@ -369,18 +374,16 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Google Drive folder — optional. Paste a share link or a
-                // bare folder id; on save this triggers a one-time backfill
-                // of whatever's already in that folder (server/src/driveBackfill.ts)
-                // so pre-existing photos show up in the gallery without
-                // needing someone to run a script by hand. Live ingestion
-                // doesn't need this at all — it routes by filename, not
-                // folder — this is purely a one-time catch-up convenience.
+                // Image source — which pipeline this device's photos come
+                // from. Purely a display/setup hint (see ImageSource's doc
+                // comment in models/device.dart): both pipelines actually
+                // work for any device regardless of this choice, but
+                // picking one here shows the right setup panel below.
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Google Drive Folder (optional)',
+                      'Image Source',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -388,28 +391,96 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    TextFormField(
-                      controller: _driveFolderController,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText:
-                            'Paste the folder\'s share link, or just its id',
-                        hintStyle: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
+                    DropdownButtonFormField<ImageSource>(
+                      initialValue: _imageSource,
+                      isDense: true,
+                      decoration: const InputDecoration(
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
                         ),
-                        isDense: true,
-                        errorText: _driveFolderError,
                       ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: ImageSource.none,
+                          child: Text(
+                            'None',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: ImageSource.tailscale,
+                          child: Text(
+                            'Tailscale (live, via Pi/laptop image server)',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: ImageSource.drive,
+                          child: Text(
+                            'Google Drive',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) setState(() => _imageSource = val);
+                      },
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: AppColors.textMuted,
+                    const SizedBox(height: 8),
+                    if (_imageSource == ImageSource.tailscale)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceSecondary,
+                          borderRadius: BorderRadius.circular(
+                            AppShapes.radiusSm,
+                          ),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: const Text(
+                          'No setup needed — the backend polls the Tailscale image server every 5 minutes and matches photos by this device\'s ID automatically.',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
                       ),
-                    ),
+                    // Google Drive folder — optional. Paste a share link or
+                    // a bare folder id; on save this triggers a one-time
+                    // backfill of whatever's already in that folder
+                    // (server/src/driveBackfill.ts) so pre-existing photos
+                    // show up in the gallery without needing someone to run
+                    // a script by hand. Live ingestion doesn't need this at
+                    // all — it routes by filename, not folder — this is
+                    // purely a one-time catch-up convenience.
+                    if (_imageSource == ImageSource.drive)
+                      TextFormField(
+                        controller: _driveFolderController,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText:
+                              'Paste the folder\'s share link, or just its id',
+                          hintStyle: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                          isDense: true,
+                          errorText: _driveFolderError,
+                        ),
+                      ),
+                    if (_imageSource == ImageSource.drive)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 12),

@@ -2,6 +2,15 @@ enum DeviceStatus { online, offline, noData }
 
 enum ConsumptionMethod { totalizer, integratedFlow }
 
+/// Which image pipeline this device's photos are expected to come from —
+/// purely a UI/display hint (which setup panel the Add/Edit dialog shows,
+/// and what badge the gallery shows). Both pipelines actually still work
+/// for any device regardless of this field: Tailscale ingestion is a
+/// global poll keyed by node id (tailscalePoll.ts), and Drive ingestion
+/// routes by filename prefix (ingestDriveImage.ts) — neither checks this
+/// field. Nothing server-side depends on it.
+enum ImageSource { none, tailscale, drive }
+
 class Device {
   final String deviceId;
   final String orgId;
@@ -11,6 +20,7 @@ class Device {
   final String driveMatchKey;
   final int expectedIntervalSeconds;
   final ConsumptionMethod consumptionMethod;
+  final ImageSource imageSource;
   final DeviceStatus status;
   final DateTime? lastSeenAt;
   final bool isActive;
@@ -25,6 +35,7 @@ class Device {
     required this.driveMatchKey,
     required this.expectedIntervalSeconds,
     this.consumptionMethod = ConsumptionMethod.totalizer,
+    this.imageSource = ImageSource.none,
     required this.status,
     this.lastSeenAt,
     this.isActive = true,
@@ -56,6 +67,7 @@ class Device {
     String? driveMatchKey,
     int? expectedIntervalSeconds,
     ConsumptionMethod? consumptionMethod,
+    ImageSource? imageSource,
     DeviceStatus? status,
     DateTime? lastSeenAt,
     bool? isActive,
@@ -71,6 +83,7 @@ class Device {
       expectedIntervalSeconds:
           expectedIntervalSeconds ?? this.expectedIntervalSeconds,
       consumptionMethod: consumptionMethod ?? this.consumptionMethod,
+      imageSource: imageSource ?? this.imageSource,
       status: status ?? this.status,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       isActive: isActive ?? this.isActive,

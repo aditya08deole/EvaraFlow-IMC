@@ -2,9 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
-import '../theme/app_shapes.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
+/// Previously showed entirely fabricated status values (a fake broker
+/// hostname, a fake service account, "Sync Polling Interval: Every 30
+/// seconds" for a pipeline that's actually push-based, and a dead-letter
+/// counter hardcoded to always read "(0)" regardless of the real number)
+/// — found during a pass looking for exactly this kind of thing, per the
+/// project's own "never present an assumption as fact" rule. Every value
+/// below is either a real constant confirmed in EVARAFLOW_GROUND_TRUTH.md
+/// (D-004/D-006/D-018-D-020) or fetched live from Firestore.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -13,21 +21,78 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _isSyncing = false;
+  final ApiService _apiService = ApiService();
+  int? _deadLetterCount;
 
-  void _triggerDriveSync() async {
-    setState(() => _isSyncing = true);
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      setState(() => _isSyncing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Manual sync isn\'t wired to a live Google Drive integration in this build — showing last known status only.',
-          ),
-        ),
-      );
+  @override
+  void initState() {
+    super.initState();
+    _loadDeadLetterCount();
+  }
+
+  Future<void> _loadDeadLetterCount() async {
+    try {
+      final count = await _apiService.getDeadLetterCount();
+      if (mounted) setState(() => _deadLetterCount = count);
+    } catch (_) {
+      // Most likely cause: signed-in user isn't an administrator —
+      // firestore.rules restricts this collection to admins, so a
+      // non-admin's query errors rather than returning 0. Leave the
+      // count as "—" (not a fabricated 0) rather than claiming a count
+      // this user isn't even allowed to see.
     }
+  }
+
+  Future<void> _showDeadLetters() async {
+    List<Map<String, dynamic>> entries;
+    try {
+      entries = await _apiService.getRecentDeadLetters(limit: 20);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load dead letters: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Recent Dead Letters (${entries.length} of total)'),
+        content: SizedBox(
+          width: 520,
+          height: 400,
+          child: entries.isEmpty
+              ? const Text('None — nothing has been rejected.')
+              : ListView.separated(
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final e = entries[i];
+                    final createdAt = e['createdAt'] as DateTime?;
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        '${e['source']} — ${e['reason']}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      subtitle: Text(
+                        createdAt != null ? dateFormat.format(createdAt) : '',
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -52,12 +117,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Monitor EMQX MQTT broker stream & Google Drive automated worker status.',
+            'Live status of the MQTT telemetry pipeline and both image pipelines (Google Drive, Tailscale).',
             style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 20),
 
-          // Pipeline A & B Integration Status Cards
+          // Pipeline A, B, C Integration Status Cards
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -68,66 +133,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: const [
-                              Icon(
-                                Icons.hub_outlined,
-                                color: AppColors.cyanAccent,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Pipeline A: EMQX MQTT',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.liveTealLight,
-                              borderRadius: BorderRadius.circular(
-                                AppShapes.radiusXs,
-                              ),
-                              border: Border.all(
-                                color: AppColors.liveTeal.withValues(
-                                  alpha: 0.4,
-                                ),
-                              ),
-                            ),
-                            child: const Text(
-                              'CONNECTED',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.liveTeal,
-                              ),
-                            ),
-                          ),
-                        ],
+                      _cardHeader(
+                        Icons.hub_outlined,
+                        AppColors.cyanAccent,
+                        'Pipeline A: MQTT',
                       ),
                       const SizedBox(height: 12),
+                      _buildSettingItem('Broker', 'mqtt.evaratech.com'),
+                      _buildSettingItem('Transport', 'wss://:443 (TLS)'),
                       _buildSettingItem(
-                        'Broker Host',
-                        'mqtt.evaraflow.com:8883 (TLS)',
-                      ),
-                      _buildSettingItem(
-                        'Backend Topic Filter',
-                        'evaraflow/org-evaratech-01/#',
-                      ),
-                      _buildSettingItem(
-                        'Subscriber Client ID',
-                        'backend-worker-node-01',
+                        'Topic Filter',
+                        'evaratech/v1/+/telemetry',
                       ),
                       _buildSettingItem(
                         'Last Message Received',
@@ -137,7 +153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       _buildSettingItem(
                         'Browser Credential Exposure',
-                        'Zero (TR-2 Enforced)',
+                        'Zero (TR-2 — this app never connects to MQTT)',
                       ),
                     ],
                   ),
@@ -152,66 +168,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: const [
-                              Icon(
-                                Icons.cloud_sync_outlined,
-                                color: AppColors.driveBlue,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Pipeline B: Google Drive',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.liveTealLight,
-                              borderRadius: BorderRadius.circular(
-                                AppShapes.radiusXs,
-                              ),
-                              border: Border.all(
-                                color: AppColors.liveTeal.withValues(
-                                  alpha: 0.4,
-                                ),
-                              ),
-                            ),
-                            child: const Text(
-                              'ACTIVE SYNC',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.liveTeal,
-                              ),
-                            ),
-                          ),
-                        ],
+                      _cardHeader(
+                        Icons.cloud_sync_outlined,
+                        AppColors.driveBlue,
+                        'Pipeline B: Google Drive',
                       ),
                       const SizedBox(height: 12),
+                      _buildSettingItem('Delivery', 'Push (Apps Script → webhook)'),
                       _buildSettingItem(
-                        'Service Account',
-                        'drive-sync@evaraflow-prod.iam.gserviceaccount.com',
+                        'Folder Scope',
+                        'Per-device (Add/Edit Device dialog)',
                       ),
                       _buildSettingItem(
-                        'Shared Folder Name',
-                        '/EvaraFlow_Device_Photos',
-                      ),
-                      _buildSettingItem(
-                        'Sync Polling Interval',
-                        'Every 30 seconds',
+                        'Filename Contract',
+                        '{node_id}_{YYYYMMDD}_{HHMMSS}.jpg',
                       ),
                       _buildSettingItem(
                         'Last Successful Sync',
@@ -219,29 +189,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ? '${dateFormat.format(latestImage.receivedAt)} (${selectedDevice?.deviceId ?? ''})'
                             : 'No images synced yet',
                       ),
-                      const SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        onPressed: _isSyncing ? null : _triggerDriveSync,
-                        icon: _isSyncing
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.sync, size: 14),
-                        label: Text(_isSyncing ? 'Syncing...' : 'Sync Now'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.driveBlue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          textStyle: const TextStyle(fontSize: 12),
-                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+
+              // Pipeline C Card: Tailscale
+              Expanded(
+                child: SurfaceCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _cardHeader(
+                        Icons.lan_outlined,
+                        AppColors.liveTeal,
+                        'Pipeline C: Tailscale',
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSettingItem('Delivery', 'Pull, every 5 minutes'),
+                      _buildSettingItem(
+                        'Viewing',
+                        'Live proxy per view (no cached copy)',
+                      ),
+                      _buildSettingItem(
+                        'Why no cache',
+                        'Avoids Firebase Storage\'s paid plan',
+                      ),
+                      _buildSettingItem(
+                        'Last Successful Sync',
+                        latestImage != null
+                            ? '${dateFormat.format(latestImage.receivedAt)} (${selectedDevice?.deviceId ?? ''})'
+                            : 'No images synced yet',
                       ),
                     ],
                   ),
@@ -270,7 +250,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Invalid MQTT payloads or unparseable Drive files are rejected here for inspection without repair.',
+                      'Invalid MQTT payloads or unparseable Drive/Tailscale files are rejected here for inspection without repair.',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppColors.textSecondary,
@@ -279,21 +259,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
                 OutlinedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Dead letters queue is clean (0 rejected items).',
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: _showDeadLetters,
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.glassBorder),
                   ),
-                  child: const Text(
-                    'View Dead Letters (0)',
-                    style: TextStyle(fontSize: 12),
+                  child: Text(
+                    _deadLetterCount == null
+                        ? 'View Dead Letters'
+                        : 'View Dead Letters (${_deadLetterCount!})',
+                    style: const TextStyle(fontSize: 12),
                   ),
                 ),
               ],
@@ -304,22 +278,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _cardHeader(IconData icon, Color color, String title) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSettingItem(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             label,
             style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
         ],
