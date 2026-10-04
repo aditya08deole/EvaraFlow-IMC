@@ -2,11 +2,21 @@
 # supported this since 1.19 -- any file placed at /etc/nginx/templates/*.template
 # gets envsubst run on it automatically at container start, writing the
 # result to /etc/nginx/conf.d/, before nginx itself starts). ${PORT} is
-# Railway's externally-assigned port for this one service; it's whatever
-# Railway sets at deploy time, so this can't be hardcoded. Falls back to
-# 8080 if PORT isn't set (e.g. a plain local `docker run` test of this image).
+# the host platform's (Railway/Render) externally-assigned port for this
+# service, set as a real env var at container start, so this can't be
+# hardcoded.
+#
+# No `:-8080` bash-style default here on purpose -- confirmed by direct
+# testing that `envsubst` does NOT understand that syntax at all (it only
+# recognizes a bare `${VARNAME}`); `${PORT:-8080}` survived completely
+# unsubstituted and nginx failed to start with "invalid port in
+# ${PORT:-8080}" even with PORT genuinely set in the environment. The
+# fallback value lives in the Dockerfile instead, as a plain `ENV
+# PORT=8080` -- Docker ENV defaults are themselves overridden by whatever
+# PORT the platform injects at container start, so the net behavior is
+# the same, just expressed somewhere envsubst can't misparse it.
 server {
-    listen ${PORT:-8080};
+    listen ${PORT};
     server_name _;
 
     root /usr/share/nginx/html;

@@ -79,4 +79,9 @@ COPY nginx.railway.conf.template /etc/nginx/templates/default.conf.template
 COPY railway-start-backend.sh /docker-entrypoint.d/50-start-backend.sh
 RUN chmod +x /docker-entrypoint.d/50-start-backend.sh
 
+# Fallback only -- Railway overrides this with its own real PORT at
+# container start. Exists because nginx.railway.conf.template's envsubst
+# can't express a fallback itself (see that file's own comment for the
+# confirmed bug this replaced: `${PORT:-8080}` silently failed to parse).
+ENV PORT=8080
 EXPOSE 8080
