@@ -175,19 +175,20 @@ test("prefers total_liters over reading_8 when both are present", async (t) => {
   assert.equal(fields.totalL, 10050.8);
 });
 
-test("dead-letters a totalizer jump too large for the time actually elapsed — the real incident this guards against", async (t) => {
-  // A real anomalous reading jumped total_liters from 493100.04 to
-  // 931000.4 (flow_rate: null) just a couple minutes after the previous
-  // one. That's an *increase*, so the decrease check alone let it
-  // through, and it then became the baseline that blocked every
-  // subsequent real, correct reading for looking like a "decrease."
-  const deadLetter = t.mock.method(db, "deadLetter", async () => {});
+test("accepts a huge, fast totalizer increase immediately — no rate-plausibility gate (EVARAFLOW_GROUND_TRUTH.md D-025)", async (t) => {
+  // Same shape as the real incident that originally motivated a
+  // rate-plausibility check (total_liters jumping ~438,000 L in minutes)
+  // — but the user explicitly wants this pipeline to show exactly what
+  // EMQX reports, in either direction, with no judgment about whether a
+  // jump "looks" physically plausible.
+  t.mock.method(db, "deadLetter", async () => {});
   t.mock.method(db, "findDeviceByNodeId", async () => ({
     ...DEVICE,
     lastTotalL: 493100.04,
     lastSeenAt: new Date(Date.now() - 2 * 60_000), // 2 minutes ago
   }));
   const insertReading = t.mock.method(db, "insertReading", async () => {});
+  t.mock.method(statusModule, "recomputeStatusAndAlerts", async () => {});
   const res = fakeRes();
   await ingestTelemetryHandler(
     fakeReq({
@@ -201,39 +202,12 @@ test("dead-letters a totalizer jump too large for the time actually elapsed — 
     res
   );
   assert.equal(res.statusCode, 200);
-  assert.match(
-    deadLetter.mock.calls[0].arguments[2] as string,
-    /jumped implausibly fast/
-  );
-  assert.equal(insertReading.mock.callCount(), 0);
-});
-
-test("accepts a large totalizer increase when enough real time actually passed", async (t) => {
-  // The same size jump as above is physically plausible if it happened
-  // over hours, not minutes — e.g. after this service was disconnected
-  // from the broker for a while and missed several real readings.
-  t.mock.method(db, "deadLetter", async () => {});
-  t.mock.method(db, "findDeviceByNodeId", async () => ({
-    ...DEVICE,
-    lastTotalL: 493100.04,
-    lastSeenAt: new Date(Date.now() - 24 * 60 * 60_000), // 24 hours ago
-  }));
-  const insertReading = t.mock.method(db, "insertReading", async () => {});
-  t.mock.method(statusModule, "recomputeStatusAndAlerts", async () => {});
-  const res = fakeRes();
-  await ingestTelemetryHandler(
-    fakeReq({
-      body: webhookBody("evaratech/v1/EVT-EF-002/telemetry", {
-        node_id: "EVT-EF-002",
-        total_liters: 931000.4,
-        flow_rate: 0,
-      }),
-      headers: AUTH_HEADERS,
-    }),
-    res
-  );
-  assert.equal(res.statusCode, 200);
   assert.equal(insertReading.mock.callCount(), 1);
+  const [, fields] = insertReading.mock.calls[0].arguments as [
+    unknown,
+    { totalL: number | null },
+  ];
+  assert.equal(fields.totalL, 931000.4);
 });
 
 test("dead-letters on a negative flow_rate or total_liters", async (t) => {

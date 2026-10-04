@@ -43,34 +43,23 @@
  * This can't catch everything — a device's very first-ever reading has no
  * prior value to check monotonicity against.
  *
- * A second real incident added the upward-jump check below: a single
- * anomalous reading (total_liters jumping ~438,000 L with flow_rate:
- * null, physically impossible) passed the decrease check — it was an
- * *increase* — and got accepted, becoming the new baseline. Every
- * subsequent real, correct, repeatedly-confirmed reading then looked like
- * a "decrease" relative to that bad baseline and got dead-lettered
- * instead, silently freezing the dashboard on the bad value. An increase
- * is now only trusted if the implied rate (the jump, divided by how much
- * time actually passed since the last accepted reading) doesn't itself
- * exceed the same physical flow ceiling.
- *
- * A decrease can also be genuine — a meter replacement or a firmware
- * reset really does start the totalizer over from a lower number, and a
- * transmission glitch (a dropped digit) can also produce one. Per
- * EVARAFLOW_GROUND_TRUTH.md D-016, this is no longer held back pending a
- * second confirming sighting — a decrease is accepted immediately, same
- * as any other reading. That trades the "can't tell a glitch from a
- * real reset on one sighting" risk for always matching whatever the
- * device actually sent without a lag, which is the tradeoff this
- * project wants for its current scope.
+ * A second real incident had previously added an upward-jump-rate check
+ * here: a single anomalous reading (total_liters jumping ~438,000 L with
+ * flow_rate: null, physically impossible) passed the decrease check — it
+ * was an *increase* — and got accepted, becoming a bad baseline. Per
+ * EVARAFLOW_GROUND_TRUTH.md D-016, decreases stopped being held back
+ * pending confirmation; per D-025, the same philosophy now applies to
+ * increases too — the user wants this pipeline to show exactly what EMQX
+ * reports, full stop, with no second-guessing of whether a jump "looks"
+ * physically plausible in either direction. total_liters is trusted as
+ * sent, always, both directions, with no comparison to its previous value
+ * at all. What's left, deliberately: rejecting outright negative values,
+ * rejecting a message missing both fields entirely, and the flow_rate
+ * ceiling below — none of those involve judging a reading against its
+ * own history the way the removed check did.
  */
 
 const MAX_PLAUSIBLE_FLOW_LPM = 1000;
-// Floor for the elapsed time used in the implied-rate check, so two
-// messages arriving within the same second or two (a quick republish,
-// clock jitter) can't produce an artificially huge implied rate purely
-// from a tiny denominator.
-const MIN_ELAPSED_MINUTES_FOR_RATE_CHECK = 0.1;
 
 import type { Request, Response } from "express";
 import { deadLetter, findDeviceByNodeId, insertReading } from "../db";
@@ -139,28 +128,6 @@ export async function processTelemetryMessage(
     );
     return;
   }
-  if (
-    total !== null &&
-    device.lastTotalL !== null &&
-    device.lastSeenAt !== null &&
-    total > device.lastTotalL
-  ) {
-    const elapsedMinutes = Math.max(
-      (Date.now() - device.lastSeenAt.getTime()) / 60_000,
-      MIN_ELAPSED_MINUTES_FOR_RATE_CHECK
-    );
-    const jump = total - device.lastTotalL;
-    const impliedFlowLpm = jump / elapsedMinutes;
-    if (impliedFlowLpm > MAX_PLAUSIBLE_FLOW_LPM) {
-      await deadLetter(
-        "mqtt",
-        parsed,
-        `total_liters jumped implausibly fast (+${jump.toFixed(1)} L over ${elapsedMinutes.toFixed(1)} min ≈ ${impliedFlowLpm.toFixed(1)} L/min, exceeds plausible ceiling of ${MAX_PLAUSIBLE_FLOW_LPM} L/min)`
-      );
-      return;
-    }
-  }
-
   await insertReading(device, { flowLpm: flow, totalL: total, raw: parsed });
   await recomputeStatusAndAlerts(device);
 }

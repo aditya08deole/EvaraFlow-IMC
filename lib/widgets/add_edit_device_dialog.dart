@@ -189,10 +189,14 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final maxDialogHeight = MediaQuery.of(context).size.height * 0.85;
     return Dialog(
       backgroundColor: Colors.transparent,
-      child: SizedBox(
-        width: 560,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 560,
+          maxHeight: maxDialogHeight,
+        ),
         child: SurfaceCard(
           padding: const EdgeInsets.all(24),
           borderRadius: 18,
@@ -202,6 +206,9 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Fixed header — stays visible while the sections below
+                // scroll, so "Cancel"/the dialog title are never lost on a
+                // small window even with every section expanded.
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -221,356 +228,347 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const Divider(height: 20),
 
-                // Device ID & Name
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: _buildTextField(
-                        controller: _idController,
-                        label: 'Device / Node ID *',
-                        hint: 'EF-006',
-                        enabled: !isEditing,
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'ID required' : null,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 6,
-                      child: _buildTextField(
-                        controller: _nameController,
-                        label: 'Device Name *',
-                        hint: 'Secondary Outlet Meter',
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'Name required' : null,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Location
-                _buildTextField(
-                  controller: _locationController,
-                  label: 'Location / Deployment Note *',
-                  hint: 'Building C - Utility Shaft',
-                  validator: (v) =>
-                      v == null || v.isEmpty ? 'Location required' : null,
-                ),
-                const SizedBox(height: 16),
-
-                // Derived connection identity — read-only, matches the
-                // real firmware convention exactly (see backend plan §05).
-                const Text(
-                  'Connection Identity',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'Derived from the Device ID above — matches what the device firmware publishes to, not independently editable.',
-                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceSecondary,
-                    borderRadius: BorderRadius.circular(AppShapes.radiusSm),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _identityRow('MQTT client ID', _mqttClientId),
-                      _identityRow('MQTT username', _mqttUsername),
-                      _identityRow('MQTT topic', _mqttTopic),
-                      _identityRow(
-                        'Drive filename prefix',
-                        _driveMatchKey,
-                        isLast: true,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // MQTT password — write-only
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'MQTT Password',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
+                // Scrollable body — each logical group is its own visually
+                // distinct card, instead of one long unbroken column, so
+                // the dialog reads as a short sequence of steps rather than
+                // a single big form. Flexible, not Expanded: paired with
+                // the outer Column's mainAxisSize.min, this lets the dialog
+                // shrink-wrap a short form instead of always stretching to
+                // maxDialogHeight, while still capping/scrolling once
+                // content actually exceeds it.
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _mqttPasswordController,
-                            obscureText: _obscurePassword,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontFamily: 'monospace',
-                            ),
-                            decoration: InputDecoration(
-                              hintText: isEditing
-                                  ? 'Leave blank to keep the current credential'
-                                  : 'Paste the credential issued when the device was provisioned',
-                              hintStyle: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textMuted,
+                        _sectionCard(
+                          title: 'Basic Info',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 4,
+                                    child: _buildTextField(
+                                      controller: _idController,
+                                      label: 'Device / Node ID *',
+                                      hint: 'EF-006',
+                                      enabled: !isEditing,
+                                      validator: (v) => v == null || v.isEmpty
+                                          ? 'ID required'
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 6,
+                                    child: _buildTextField(
+                                      controller: _nameController,
+                                      label: 'Device Name *',
+                                      hint: 'Secondary Outlet Meter',
+                                      validator: (v) => v == null || v.isEmpty
+                                          ? 'Name required'
+                                          : null,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              isDense: true,
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
-                                  size: 18,
-                                ),
-                                onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword,
-                                ),
+                              const SizedBox(height: 12),
+                              _buildTextField(
+                                controller: _locationController,
+                                label: 'Location / Deployment Note *',
+                                hint: 'Building C - Utility Shaft',
+                                validator: (v) => v == null || v.isEmpty
+                                    ? 'Location required'
+                                    : null,
                               ),
-                            ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        OutlinedButton(
-                          onPressed: _generatePassword,
-                          child: const Text(
-                            'Generate',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Stored only as a secret-manager reference once a real backend is wired up — never shown again after saving.',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
+                        const SizedBox(height: 14),
 
-                // Image source — which pipeline this device's photos come
-                // from. Purely a display/setup hint (see ImageSource's doc
-                // comment in models/device.dart): both pipelines actually
-                // work for any device regardless of this choice, but
-                // picking one here shows the right setup panel below.
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Image Source',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<ImageSource>(
-                      initialValue: _imageSource,
-                      isDense: true,
-                      decoration: const InputDecoration(
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: ImageSource.none,
-                          child: Text(
-                            'None',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: ImageSource.tailscale,
-                          child: Text(
-                            'Tailscale (live, via Pi/laptop image server)',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: ImageSource.drive,
-                          child: Text(
-                            'Google Drive',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) setState(() => _imageSource = val);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    if (_imageSource == ImageSource.tailscale)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceSecondary,
-                          borderRadius: BorderRadius.circular(
-                            AppShapes.radiusSm,
-                          ),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: const Text(
-                          'No setup needed — the backend polls the Tailscale image server every 5 minutes and matches photos by this device\'s ID automatically.',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ),
-                    // Google Drive folder — optional. Paste a share link or
-                    // a bare folder id; on save this triggers a one-time
-                    // backfill of whatever's already in that folder
-                    // (server/src/driveBackfill.ts) so pre-existing photos
-                    // show up in the gallery without needing someone to run
-                    // a script by hand. Live ingestion doesn't need this at
-                    // all — it routes by filename, not folder — this is
-                    // purely a one-time catch-up convenience.
-                    if (_imageSource == ImageSource.drive)
-                      TextFormField(
-                        controller: _driveFolderController,
-                        style: const TextStyle(fontSize: 13),
-                        decoration: InputDecoration(
-                          hintText:
-                              'Paste the folder\'s share link, or just its id',
-                          hintStyle: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
-                          isDense: true,
-                          errorText: _driveFolderError,
-                        ),
-                      ),
-                    if (_imageSource == ImageSource.drive)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: Text(
-                          'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Interval & Calculation method
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildTextField(
-                        controller: _intervalController,
-                        label: 'Expected Interval (seconds)',
-                        hint: '300',
-                        keyboardType: TextInputType.number,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Consumption Method',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          DropdownButtonFormField<ConsumptionMethod>(
-                            initialValue: _consumptionMethod,
-                            isDense: true,
-                            decoration: InputDecoration(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
+                        // Derived connection identity — read-only, matches
+                        // the real firmware convention exactly (see backend
+                        // plan §05).
+                        _sectionCard(
+                          title: 'Connection Identity',
+                          subtitle:
+                              'Derived from the Device ID above — matches what the device firmware publishes to, not independently editable.',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _identityRow('MQTT client ID', _mqttClientId),
+                              _identityRow('MQTT username', _mqttUsername),
+                              _identityRow('MQTT topic', _mqttTopic),
+                              _identityRow(
+                                'Drive filename prefix',
+                                _driveMatchKey,
+                                isLast: true,
                               ),
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: ConsumptionMethod.totalizer,
-                                child: Text(
-                                  'Totalizer (Cum. Liters)',
-                                  style: TextStyle(fontSize: 12),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // MQTT password — write-only
+                        _sectionCard(
+                          title: 'MQTT Password',
+                          subtitle:
+                              'Stored only as a secret-manager reference once a real backend is wired up — never shown again after saving.',
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _mqttPasswordController,
+                                  obscureText: _obscurePassword,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontFamily: 'monospace',
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: isEditing
+                                        ? 'Leave blank to keep the current credential'
+                                        : 'Paste the credential issued when the device was provisioned',
+                                    hintStyle: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textMuted,
+                                    ),
+                                    isDense: true,
+                                    suffixIcon: IconButton(
+                                      icon: Icon(
+                                        _obscurePassword
+                                            ? Icons.visibility_outlined
+                                            : Icons.visibility_off_outlined,
+                                        size: 18,
+                                      ),
+                                      onPressed: () => setState(
+                                        () => _obscurePassword =
+                                            !_obscurePassword,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
-                              DropdownMenuItem(
-                                value: ConsumptionMethod.integratedFlow,
-                                child: Text(
-                                  'Integrated Flow',
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                onPressed: _generatePassword,
+                                child: const Text(
+                                  'Generate',
                                   style: TextStyle(fontSize: 12),
                                 ),
                               ),
                             ],
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => _consumptionMethod = val);
-                              }
-                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Image source — which pipeline this device's photos
+                        // come from. Purely a display/setup hint (see
+                        // ImageSource's doc comment in models/device.dart):
+                        // both pipelines actually work for any device
+                        // regardless of this choice, but picking one here
+                        // shows the right setup panel below.
+                        _sectionCard(
+                          title: 'Image Source',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              DropdownButtonFormField<ImageSource>(
+                                initialValue: _imageSource,
+                                isDense: true,
+                                decoration: const InputDecoration(
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: ImageSource.none,
+                                    child: Text(
+                                      'None',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: ImageSource.tailscale,
+                                    child: Text(
+                                      'Tailscale (live, via Pi/laptop image server)',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: ImageSource.drive,
+                                    child: Text(
+                                      'Google Drive',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (val) {
+                                  if (val != null) {
+                                    setState(() => _imageSource = val);
+                                  }
+                                },
+                              ),
+                              if (_imageSource == ImageSource.tailscale) ...[
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'No setup needed — the backend polls the Tailscale image server every 5 minutes and matches photos by this device\'s ID automatically.',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                              // Google Drive folder — optional. Paste a
+                              // share link or a bare folder id; on save this
+                              // triggers a one-time backfill of whatever's
+                              // already in that folder
+                              // (server/src/driveBackfill.ts) so
+                              // pre-existing photos show up in the gallery
+                              // without needing someone to run a script by
+                              // hand. Live ingestion doesn't need this at
+                              // all — it routes by filename, not folder —
+                              // this is purely a one-time catch-up
+                              // convenience.
+                              if (_imageSource == ImageSource.drive) ...[
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  controller: _driveFolderController,
+                                  style: const TextStyle(fontSize: 13),
+                                  decoration: InputDecoration(
+                                    hintText:
+                                        'Paste the folder\'s share link, or just its id',
+                                    hintStyle: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textMuted,
+                                    ),
+                                    isDense: true,
+                                    errorText: _driveFolderError,
+                                  ),
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        _sectionCard(
+                          title: 'Advanced',
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _buildTextField(
+                                  controller: _intervalController,
+                                  label: 'Expected Interval (seconds)',
+                                  hint: '300',
+                                  keyboardType: TextInputType.number,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Consumption Method',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    DropdownButtonFormField<ConsumptionMethod>(
+                                      initialValue: _consumptionMethod,
+                                      isDense: true,
+                                      decoration: InputDecoration(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                      ),
+                                      items: const [
+                                        DropdownMenuItem(
+                                          value: ConsumptionMethod.totalizer,
+                                          child: Text(
+                                            'Totalizer (Cum. Liters)',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                        DropdownMenuItem(
+                                          value:
+                                              ConsumptionMethod.integratedFlow,
+                                          child: Text(
+                                            'Integrated Flow',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                      onChanged: (val) {
+                                        if (val != null) {
+                                          setState(
+                                            () => _consumptionMethod = val,
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_submitError != null) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerLight,
+                              borderRadius: BorderRadius.circular(
+                                AppShapes.radiusSm,
+                              ),
+                            ),
+                            child: Text(
+                              _submitError!,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: AppColors.dangerRed,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (_submitError != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.dangerLight,
-                      borderRadius: BorderRadius.circular(AppShapes.radiusSm),
-                    ),
-                    child: Text(
-                      _submitError!,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.dangerRed,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 24),
+                ),
 
-                // Actions
+                // Fixed footer actions — always reachable regardless of
+                // scroll position.
+                const Divider(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -608,6 +606,52 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// One visually distinct section — a titled card of its own, rather than
+  /// everything living in one unbroken column. Deliberately a plain
+  /// bordered Container, not a nested SurfaceCard: stacking several real
+  /// glass-shader surfaces inside the dialog's own SurfaceCard would be
+  /// both visually heavy and comparatively expensive to render.
+  Widget _sectionCard({
+    required String title,
+    String? subtitle,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSecondary,
+        borderRadius: BorderRadius.circular(AppShapes.radiusSm),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                fontSize: 10.5,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          child,
+        ],
       ),
     );
   }

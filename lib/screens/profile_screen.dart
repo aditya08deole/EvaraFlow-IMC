@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/device.dart';
 import '../services/api_service.dart';
 import '../theme/app_shapes.dart';
 import '../theme/app_theme.dart';
@@ -9,9 +11,11 @@ import '../theme/app_theme.dart';
 /// security/alert settings claimed as "Enabled" (2FA, API token scopes,
 /// alert channels) for features that don't exist anywhere in this
 /// codebase — found during a pass looking for exactly this kind of thing.
-/// Identity/org/fleet count below are the real signed-in user and real
-/// Firestore data; the security/alerts cards are now labeled as what they
-/// actually are (not built yet) rather than claimed as active.
+/// Everything below is either the real signed-in Firebase Auth user (incl.
+/// its own account-creation/last-sign-in timestamps, which Firebase Auth
+/// already tracks — nothing invented) or a real Firestore query; the
+/// security/alerts card is labeled as what it actually is (not built yet)
+/// rather than claimed as active.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -22,7 +26,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final ApiService _apiService = ApiService();
   String? _orgId;
-  int? _deviceCount;
+  List<Device>? _devices;
 
   @override
   void initState() {
@@ -37,7 +41,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         setState(() {
           _orgId = orgId;
-          _deviceCount = devices.length;
+          _devices = devices;
         });
       }
     } catch (_) {
@@ -61,6 +65,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               .take(2)
               .map((w) => w[0].toUpperCase())
               .join();
+    final dateFormat = DateFormat('MMM d, yyyy \'at\' HH:mm');
+
+    final online = _devices?.where((d) => d.status == DeviceStatus.online).length;
+    final offline = _devices?.where((d) => d.status == DeviceStatus.offline).length;
+    final noData = _devices?.where((d) => d.status == DeviceStatus.noData).length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -98,7 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       Text(
-                        'Signed-in account and organization.',
+                        'Signed-in account, organization, and fleet overview.',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppColors.textSecondary,
@@ -165,26 +174,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            displayName,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            user?.email ?? '',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        user?.email ?? '',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       const Divider(),
@@ -198,16 +202,88 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             _orgId ?? '—',
                             Icons.tag_rounded,
                           ),
-                          const SizedBox(width: 24),
+                          const SizedBox(width: 16),
                           _buildProfileInfoItem(
-                            'Registered Devices',
-                            _deviceCount != null ? '$_deviceCount' : '—',
-                            Icons.sensors_rounded,
+                            'Account Created',
+                            user?.metadata.creationTime != null
+                                ? dateFormat.format(user!.metadata.creationTime!)
+                                : '—',
+                            Icons.calendar_today_rounded,
+                          ),
+                          const SizedBox(width: 16),
+                          _buildProfileInfoItem(
+                            'Last Sign-In',
+                            user?.metadata.lastSignInTime != null
+                                ? dateFormat.format(user!.metadata.lastSignInTime!)
+                                : '—',
+                            Icons.login_rounded,
                           ),
                         ],
                       ),
                     ],
                   ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Fleet Overview — real device-status breakdown, not just a
+          // flat count, so this card is actually useful at a glance.
+          SurfaceCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Icon(
+                      Icons.sensors_rounded,
+                      size: 18,
+                      color: AppColors.primary,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Fleet Overview',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    _fleetStatusChip(
+                      'Total',
+                      _devices != null ? '${_devices!.length}' : '—',
+                      AppColors.textMuted,
+                      AppColors.backgroundSecondary,
+                    ),
+                    const SizedBox(width: 10),
+                    _fleetStatusChip(
+                      'Online',
+                      online != null ? '$online' : '—',
+                      AppColors.liveTeal,
+                      AppColors.liveTealLight,
+                    ),
+                    const SizedBox(width: 10),
+                    _fleetStatusChip(
+                      'Offline',
+                      offline != null ? '$offline' : '—',
+                      AppColors.dangerRed,
+                      AppColors.dangerLight,
+                    ),
+                    const SizedBox(width: 10),
+                    _fleetStatusChip(
+                      'No Data Yet',
+                      noData != null ? '$noData' : '—',
+                      AppColors.warningAmber,
+                      AppColors.warningLight,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -250,6 +326,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _fleetStatusChip(
+    String label,
+    String value,
+    Color accent,
+    Color background,
+  ) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(AppShapes.radiusSm),
+          border: Border.all(color: accent.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: accent,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
