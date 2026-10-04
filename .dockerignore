@@ -1,8 +1,27 @@
-# Only build/web is actually copied into the frontend image (see
-# Dockerfile) -- everything else is excluded so Docker doesn't have to
-# read/hash this whole repo (including server/node_modules,
-# functions/node_modules, .git, and every native platform folder) just to
-# build a tiny nginx image.
-*
-!build/web
+# Shared by two different Dockerfiles with different needs, so this is a
+# denylist (exclude the heavy/irrelevant stuff), not an allowlist:
+#   - Dockerfile (local, docker-compose.yml): only needs build/web/
+#   - Dockerfile.railway (Railway only): needs pubspec.yaml, lib/, web/,
+#     assets/ to build Flutter web from source, since Railway builds from
+#     git content and build/web/ isn't committed (see its own comment).
+.git/
+.dart_tool/
+.idea/
+.vscode/
+# build/ has ~300MB of Flutter build cache (test_cache, native_assets,
+# .dill files) that neither Dockerfile needs -- only build/web/ (used by
+# the local Dockerfile) is let back through.
+build/
+!build/web/
 !build/web/**
+android/
+ios/
+linux/
+macos/
+windows/
+test/
+server/
+functions/
+k8s/
+tailscale-image-server/
+*.md

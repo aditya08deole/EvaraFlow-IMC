@@ -1,0 +1,32 @@
+# Frontend Dockerfile for Railway specifically -- different from the root
+# Dockerfile used by docker-compose.yml for local runs.
+#
+# The local Dockerfile just copies an already-built build/web/ (built fast,
+# on the host, with Flutter already installed there -- see its own comment
+# for why: building Flutter inside Docker locally was tried and abandoned
+# after a ~1.8GB base image stalled repeatedly on that network).
+#
+# Railway can't do that: it builds from the git repo's actual committed
+# content, and build/web/ is a local build artifact, deliberately not
+# committed (Flutter's own .gitignore). So THIS Dockerfile builds Flutter
+# web from source, inside the container -- the approach abandoned locally
+# is expected to work fine here, since Railway's build infrastructure has
+# proper cloud-to-cloud bandwidth pulling that base image, unlike the
+# residential connection where it stalled.
+#
+# Railway service settings: set this service's Dockerfile Path to
+# "Dockerfile.railway" (Root Directory can stay at the repo root, since
+# this needs the whole lib/, web/, pubspec.yaml -- not just a subfolder).
+
+FROM ghcr.io/cirruslabs/flutter:stable AS build
+WORKDIR /app
+COPY pubspec.yaml pubspec.lock* ./
+RUN flutter pub get
+COPY lib ./lib
+COPY web ./web
+COPY assets ./assets
+RUN flutter build web --release
+
+FROM nginx:alpine
+COPY --from=build /app/build/web /usr/share/nginx/html
+EXPOSE 80
