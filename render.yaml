@@ -16,8 +16,6 @@ services:
       # instead of ever reading a real value out of this committed file.
       - key: FIREBASE_SERVICE_ACCOUNT_BASE64
         sync: false
-      - key: FIREBASE_STORAGE_BUCKET
-        sync: false
       - key: EMQX_WEBHOOK_SECRET
         sync: false
       - key: DRIVE_WEBHOOK_SECRET
