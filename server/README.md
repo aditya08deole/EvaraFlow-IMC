@@ -84,6 +84,12 @@ npm run dev             # tsc --watch
 node dist/index.js      # separate terminal, after a build exists
 ```
 
+Don't want Node installed locally at all, or want this running continuously
+without babysitting a terminal? Use `../run.sh` / `../run.ps1` / `../run.bat`
+(repo root) instead — same `.env`, but built and run in a Docker container
+with `restart: unless-stopped`, so it survives crashes without a hand-rolled
+supervisor script. See the root `README.md`'s Quick Start.
+
 ## Known gaps (carried over from the Cloud Functions version)
 
 - No offline-detection sweep yet — `status.ts` can only prove a device

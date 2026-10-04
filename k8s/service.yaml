@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: evaraflow-backend
+spec:
+  selector:
+    app: evaraflow-backend
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      # Fixed so the URL in k8s/README.md is always correct without having
+      # to look up a randomly-assigned port first.
+      nodePort: 30081

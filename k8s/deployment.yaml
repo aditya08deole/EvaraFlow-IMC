@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evaraflow-backend
+  labels:
+    app: evaraflow-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evaraflow-backend
+  template:
+    metadata:
+      labels:
+        app: evaraflow-backend
+    spec:
+      containers:
+        - name: backend
+          # Built from server/Dockerfile. No public registry push is set up
+          # for this project, so build and load this image into whatever
+          # cluster you're using before applying this file -- see
+          # k8s/README.md for the exact commands (they differ for Docker
+          # Desktop's built-in Kubernetes vs. kind vs. minikube).
+          image: evaraflow-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                # Create this first from secret.example.yaml with your own
+                # real values -- see k8s/README.md.
+                name: evaraflow-backend-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30

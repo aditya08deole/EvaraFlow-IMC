@@ -11,6 +11,14 @@
  * being closed or this machine sleeping. It's a stopgap for local dev, not
  * a substitute for an always-on host.
  *
+ * Superseded for most local use by ../run.sh / ../run.ps1 / ../run.bat
+ * (repo root), which run this same server in Docker with
+ * `restart: unless-stopped` — strictly more robust than this hand-rolled
+ * supervisor, and doesn't need Node installed on the host at all. This
+ * file is kept for the no-Docker case (e.g. actively debugging with a
+ * local `tsc --watch`, where a container's build-on-every-change loop is
+ * slower than just restarting the process).
+ *
  * Usage: node run-persistent.js   (from server/, after `npm run build`)
  */
 

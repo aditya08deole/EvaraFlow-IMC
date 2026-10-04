@@ -1,0 +1,44 @@
+# Runs the EvaraFlow backend (server/) in a container on any machine with
+# Docker installed. Use the run.sh / run.ps1 / run.bat scripts in this same
+# folder instead of calling `docker compose` directly — they check Docker is
+# installed first and tell you how to get it if not.
+#
+# This does NOT remove the need for real secrets: FIREBASE_SERVICE_ACCOUNT_BASE64,
+# the broker credentials, etc. are specific to this project's actual Firebase
+# project and MQTT broker — no container can know those for you. Fill in
+# server/.env (copy server/.env.example if it doesn't exist yet) before
+# running this; the launcher scripts check for that file and tell you if it's
+# missing, rather than starting a backend with no real configuration.
+#
+# Only the backend is containerized here. The Flutter dashboard is a
+# client app (built separately — see README.md); the Tailscale image-server
+# pipeline additionally needs this container to have real network access to
+# your Tailscale network, which Docker Desktop's default networking does not
+# provide out of the box — see k8s/README.md and README.md's "Docker" section
+# for what that does and doesn't cover.
+services:
+  backend:
+    build:
+      context: ./server
+    env_file:
+      - ./server/.env
+    environment:
+      # Confirmed necessary live, not assumed: server/.env's own PORT=8081
+      # (set there for local non-Docker runs) comes through via env_file
+      # above and overrides the app's internal listening port too, while
+      # the port mapping below still forwarded host 8081 -> container 8080
+      # -- nothing was listening on 8080 inside the container, so every
+      # connection got accepted by Docker's proxy and then silently
+      # dropped. `environment:` entries win over `env_file:` for the same
+      # key in Compose, so this pins the container's internal port to 8080
+      # regardless of whatever PORT value server/.env happens to have.
+      PORT: "8080"
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
