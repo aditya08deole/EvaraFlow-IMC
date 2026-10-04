@@ -1,0 +1,94 @@
+# Single-service Dockerfile for Render -- the primary deployment target
+# now. Same combined-container approach as `Dockerfile.railway` (nginx +
+# the Node backend in one container, one web service, no per-service root
+# directory to pick), just pointed at Render instead: `render.yaml` at the
+# repo root is Render's own Blueprint format, auto-detected when you
+# create a service via "New + -> Blueprint" pointed at this repo, so
+# there's nothing to configure by hand in Render's dashboard either.
+#
+# Shares `nginx.railway.conf.template` and `railway-start-backend.sh`
+# with Dockerfile.railway on purpose -- despite the filenames, neither
+# file does anything Railway-specific; both just template whatever $PORT
+# the hosting platform injects at runtime (Render sets this exactly the
+# same way Railway does), so duplicating them per-platform would just be
+# two copies of the same logic to keep in sync.
+#
+# Different from the root `Dockerfile` (local docker-compose only), which
+# just copies an already-built, gitignored build/web/ into a bare nginx
+# image -- fast locally, but Render, like Railway, builds only from
+# committed git content, so build/web/ doesn't exist there. This builds
+# Flutter web from source instead (the approach abandoned for LOCAL use,
+# see the root Dockerfile's own comment, after its ~1.8GB base image
+# stalled repeatedly on a residential connection) -- expected to work
+# fine on Render's own build infrastructure.
+#
+# How frontend and backend share one container: nginx serves the built
+# Flutter web app and reverse-proxies the handful of backend routes
+# (/health, /ingest/*, /admin/*, /tailscale-images/*, /drive-images/*) to
+# the Node process, which also runs in this container on a fixed internal
+# port (3000, never Render's externally-assigned $PORT -- the two must
+# never collide). Same-origin by construction -- no CORS, no separate
+# backend domain, no PUBLIC_BASE_URL chicken-and-egg beyond the one
+# domain this single service gets.
+#
+# Required Render env vars (set once, in this one service's Environment
+# tab -- render.yaml deliberately lists these with `sync: false` so
+# Render prompts for real values instead of them ever being committed):
+# FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_STORAGE_BUCKET,
+# EMQX_WEBHOOK_SECRET, DRIVE_WEBHOOK_SECRET, TAILSCALE_WEBHOOK_SECRET,
+# TAILSCALE_IMAGE_BASE_URL, MQTT_HOST, MQTT_PROTOCOL, MQTT_WS_PATH,
+# MQTT_USERNAME, MQTT_PASSWORD, MQTT_TOPIC_FILTER, and PUBLIC_BASE_URL --
+# the last one can only be filled in correctly after the first deploy,
+# once Render hands this service its real *.onrender.com domain.
+#
+# Known gap this doesn't solve: the Tailscale image pipeline needs real
+# network access to the user's private Tailscale network, which this
+# container does not have by default -- same unresolved limitation
+# already documented in k8s/README.md for Kubernetes and Dockerfile.railway.
+# Drive-sourced devices are unaffected.
+#
+# Free-tier sleep: Render's free web services spin down after 15 minutes
+# with no inbound requests, then take ~30-50s to wake on the next one.
+# .github/workflows/keep-render-awake.yml pings this service's /health
+# every 10 minutes so it never goes idle long enough to sleep -- see that
+# workflow's own comment for the one secret it needs and the free-tier
+# monthly-hours caveat.
+
+FROM ghcr.io/cirruslabs/flutter:stable AS frontend-build
+WORKDIR /app
+COPY pubspec.yaml pubspec.lock* ./
+RUN flutter pub get
+COPY lib ./lib
+COPY web ./web
+COPY assets ./assets
+# Empty BACKEND_BASE_URL makes lib/config.dart's admin-backfill call use a
+# relative URL, resolved by the browser against whatever origin this page
+# was loaded from -- which is always this same single service, so it just
+# works without knowing Render's domain at build time. See config.dart's
+# own comment.
+RUN flutter build web --release --dart-define=BACKEND_BASE_URL=
+
+FROM node:20-alpine AS backend-build
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci
+COPY server/tsconfig.json ./
+COPY server/src ./src
+RUN npm run build
+
+FROM node:20-alpine AS backend-deps
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+
+FROM nginx:alpine
+RUN apk add --no-cache nodejs
+WORKDIR /app
+COPY --from=backend-deps /app/node_modules ./node_modules
+COPY --from=backend-build /app/dist ./dist
+COPY --from=frontend-build /app/build/web /usr/share/nginx/html
+COPY nginx.railway.conf.template /etc/nginx/templates/default.conf.template
+COPY railway-start-backend.sh /docker-entrypoint.d/50-start-backend.sh
+RUN chmod +x /docker-entrypoint.d/50-start-backend.sh
+
+EXPOSE 8080

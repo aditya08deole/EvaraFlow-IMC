@@ -1,0 +1,30 @@
+# Render's free web services spin down after 15 minutes with no inbound
+# requests, then take ~30-50s to wake back up on the next one -- fine for
+# a background job, not for a dashboard someone's actually trying to open.
+# This hits the deployed service's own /health endpoint every 10 minutes
+# so it never goes idle long enough to sleep.
+#
+# Needs one repo secret: RENDER_SERVICE_URL, set to this service's real
+# public URL (e.g. https://evaraflow-dashboard.onrender.com) once Render
+# hands that out after the first deploy -- GitHub Settings -> Secrets and
+# variables -> Actions -> New repository secret. Not sensitive by itself
+# (it's a public URL), kept as a secret only so it's a one-time dashboard
+# edit instead of a code change if the service is ever recreated.
+#
+# Worth knowing, not just assumed: Render's free plan shares 750
+# instance-hours/month across every free service on the account. Keeping
+# one service alive 24/7 this way uses ~720 of those -- fine if this is
+# the only free service on the account, but it will eat into the shared
+# pool if there are others. This is a common workaround, not an
+# officially guaranteed-permanent feature of Render's free tier.
+name: Keep Render service awake
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health on the deployed Render service
+        run: curl -fsS "${{ secrets.RENDER_SERVICE_URL }}/health"

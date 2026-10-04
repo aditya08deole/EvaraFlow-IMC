@@ -1,0 +1,45 @@
+# Render Blueprint -- auto-detected when you create a service via Render's
+# dashboard: "New +" -> "Blueprint" -> pick this repo. Render reads this
+# file and creates the service with the right Dockerfile and health check
+# already wired up; nothing else needs picking by hand.
+services:
+  - type: web
+    name: evaraflow-dashboard
+    runtime: docker
+    repo: https://github.com/aditya08deole/EvaraFlow-IMC.git
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # sync: false -- Render prompts for each of these in its dashboard
+      # instead of ever reading a real value out of this committed file.
+      - key: FIREBASE_SERVICE_ACCOUNT_BASE64
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: EMQX_WEBHOOK_SECRET
+        sync: false
+      - key: DRIVE_WEBHOOK_SECRET
+        sync: false
+      - key: TAILSCALE_WEBHOOK_SECRET
+        sync: false
+      - key: TAILSCALE_IMAGE_BASE_URL
+        sync: false
+      - key: MQTT_HOST
+        sync: false
+      - key: MQTT_PROTOCOL
+        sync: false
+      - key: MQTT_WS_PATH
+        sync: false
+      - key: MQTT_USERNAME
+        sync: false
+      - key: MQTT_PASSWORD
+        sync: false
+      - key: MQTT_TOPIC_FILTER
+        sync: false
+      # Can only be filled in correctly after the first deploy, once
+      # Render hands this service its real onrender.com domain -- see
+      # Dockerfile.render's own comment.
+      - key: PUBLIC_BASE_URL
+        sync: false
