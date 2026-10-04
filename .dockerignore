@@ -1,9 +1,12 @@
 # Shared by two different Dockerfiles with different needs, so this is a
 # denylist (exclude the heavy/irrelevant stuff), not an allowlist:
 #   - Dockerfile (local, docker-compose.yml): only needs build/web/
-#   - Dockerfile.railway (Railway only): needs pubspec.yaml, lib/, web/,
-#     assets/ to build Flutter web from source, since Railway builds from
-#     git content and build/web/ isn't committed (see its own comment).
+#   - Dockerfile.railway (Railway's single combined service): needs
+#     pubspec.yaml, lib/, web/, assets/ to build Flutter web from source
+#     (build/web/ isn't committed, see its own comment), AND server/'s
+#     package.json/tsconfig.json/src to build the backend into the same
+#     image -- so server/ can no longer be blanket-excluded the way it
+#     could when Dockerfile.railway only built the frontend.
 .git/
 .dart_tool/
 .idea/
@@ -20,7 +23,13 @@ linux/
 macos/
 windows/
 test/
-server/
+# server/'s own node_modules (~92MB) and compiled dist/ are rebuilt fresh
+# inside Dockerfile.railway's backend-build/backend-deps stages -- only
+# these specific heavy/generated paths need excluding, not server/ itself.
+server/node_modules/
+server/dist/
+server/.env
+server/*.log
 functions/
 k8s/
 tailscale-image-server/

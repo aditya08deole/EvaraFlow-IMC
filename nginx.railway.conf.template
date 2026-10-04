@@ -1,0 +1,52 @@
+# Templated by nginx's own built-in envsubst mechanism (nginx:alpine has
+# supported this since 1.19 -- any file placed at /etc/nginx/templates/*.template
+# gets envsubst run on it automatically at container start, writing the
+# result to /etc/nginx/conf.d/, before nginx itself starts). ${PORT} is
+# Railway's externally-assigned port for this one service; it's whatever
+# Railway sets at deploy time, so this can't be hardcoded. Falls back to
+# 8080 if PORT isn't set (e.g. a plain local `docker run` test of this image).
+server {
+    listen ${PORT:-8080};
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Everything the backend (server/src/index.ts) actually exposes --
+    # webhooks (ingest), the admin backfill trigger, and the two image
+    # proxies -- forwarded to the Node process running in this same
+    # container on its fixed internal port (never Railway's $PORT; see
+    # railway-start-backend.sh). Same-origin means the frontend's
+    # admin-backfill call and the Firestore-stored image proxy URLs all
+    # just work with no CORS and no separate domain to configure.
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+    }
+
+    location /ingest/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location /admin/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location /tailscale-images/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location /drive-images/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    # Flutter web's own client-side routing -- unknown paths fall back to
+    # index.html rather than a raw nginx 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(?:js|css|png|jpg|jpeg|gif|ico|svg|wasm|json)$ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+}

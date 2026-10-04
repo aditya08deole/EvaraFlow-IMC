@@ -1,32 +1,82 @@
-# Frontend Dockerfile for Railway specifically -- different from the root
-# Dockerfile used by docker-compose.yml for local runs.
+# Single-service Dockerfile for Railway: builds and runs BOTH the Flutter
+# frontend and the Node backend (server/) in one container, so this project
+# deploys as one Railway service instead of two. Picked over two services
+# specifically to avoid Railway's per-service Root Directory setting (which
+# has no "which root?" picker during initial repo import, and was the
+# exact point the user got stuck on) -- see root `railway.json`, which
+# points Railway at this Dockerfile automatically with Root Directory left
+# at its default (the whole repo), so no manual Settings field needs to be
+# touched at all.
 #
-# The local Dockerfile just copies an already-built build/web/ (built fast,
-# on the host, with Flutter already installed there -- see its own comment
-# for why: building Flutter inside Docker locally was tried and abandoned
-# after a ~1.8GB base image stalled repeatedly on that network).
+# Different from the root `Dockerfile` (local docker-compose only), which
+# just copies an already-built, gitignored build/web/ into a bare nginx
+# image -- fast locally, but Railway builds only from committed git
+# content, so build/web/ doesn't exist there. This Dockerfile builds
+# Flutter web from source instead (the approach abandoned for LOCAL use in
+# the root Dockerfile's own comment, after its ~1.8GB base image stalled
+# repeatedly on a residential connection) -- expected to work fine here on
+# Railway's cloud-to-cloud bandwidth pulling that same image.
 #
-# Railway can't do that: it builds from the git repo's actual committed
-# content, and build/web/ is a local build artifact, deliberately not
-# committed (Flutter's own .gitignore). So THIS Dockerfile builds Flutter
-# web from source, inside the container -- the approach abandoned locally
-# is expected to work fine here, since Railway's build infrastructure has
-# proper cloud-to-cloud bandwidth pulling that base image, unlike the
-# residential connection where it stalled.
+# How frontend and backend share one container: nginx serves the built
+# Flutter web app and reverse-proxies the handful of backend routes
+# (/health, /ingest/*, /admin/*, /tailscale-images/*, /drive-images/*) to
+# the Node process, which also runs in this container on a fixed internal
+# port (see railway-start-backend.sh). nginx is the only thing bound to
+# Railway's externally-assigned $PORT (see nginx.railway.conf.template).
+# Same-origin by construction -- no CORS, no separate backend domain to
+# configure, no PUBLIC_BASE_URL chicken-and-egg beyond the one domain this
+# single service gets.
 #
-# Railway service settings: set this service's Dockerfile Path to
-# "Dockerfile.railway" (Root Directory can stay at the repo root, since
-# this needs the whole lib/, web/, pubspec.yaml -- not just a subfolder).
+# Required Railway env vars (set once, in this one service's Variables
+# tab): FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_STORAGE_BUCKET,
+# EMQX_WEBHOOK_SECRET, DRIVE_WEBHOOK_SECRET, TAILSCALE_WEBHOOK_SECRET,
+# TAILSCALE_IMAGE_BASE_URL, MQTT_HOST, MQTT_PROTOCOL, MQTT_WS_PATH,
+# MQTT_USERNAME, MQTT_PASSWORD, MQTT_TOPIC_FILTER, and PUBLIC_BASE_URL --
+# the last one can only be filled in correctly after the first deploy,
+# once Railway hands this service its real public domain (Settings ->
+# Networking), since that's what PUBLIC_BASE_URL needs to be.
+#
+# Known gap this doesn't solve: the Tailscale image pipeline needs real
+# network access to the user's private Tailscale network, which this
+# container does not have by default -- same unresolved limitation
+# already documented in k8s/README.md for Kubernetes. Drive-sourced
+# devices are unaffected.
 
-FROM ghcr.io/cirruslabs/flutter:stable AS build
+FROM ghcr.io/cirruslabs/flutter:stable AS frontend-build
 WORKDIR /app
 COPY pubspec.yaml pubspec.lock* ./
 RUN flutter pub get
 COPY lib ./lib
 COPY web ./web
 COPY assets ./assets
-RUN flutter build web --release
+# Empty BACKEND_BASE_URL makes lib/config.dart's admin-backfill call use a
+# relative URL, resolved by the browser against whatever origin this page
+# was loaded from -- which is always this same single service, so it just
+# works without knowing Railway's domain at build time. See config.dart's
+# own comment.
+RUN flutter build web --release --dart-define=BACKEND_BASE_URL=
+
+FROM node:20-alpine AS backend-build
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci
+COPY server/tsconfig.json ./
+COPY server/src ./src
+RUN npm run build
+
+FROM node:20-alpine AS backend-deps
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci --omit=dev
 
 FROM nginx:alpine
-COPY --from=build /app/build/web /usr/share/nginx/html
-EXPOSE 80
+RUN apk add --no-cache nodejs
+WORKDIR /app
+COPY --from=backend-deps /app/node_modules ./node_modules
+COPY --from=backend-build /app/dist ./dist
+COPY --from=frontend-build /app/build/web /usr/share/nginx/html
+COPY nginx.railway.conf.template /etc/nginx/templates/default.conf.template
+COPY railway-start-backend.sh /docker-entrypoint.d/50-start-backend.sh
+RUN chmod +x /docker-entrypoint.d/50-start-backend.sh
+
+EXPOSE 8080
