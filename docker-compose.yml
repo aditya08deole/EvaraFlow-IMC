@@ -1,22 +1,43 @@
-# Runs the EvaraFlow backend (server/) in a container on any machine with
-# Docker installed. Use the run.sh / run.ps1 / run.bat scripts in this same
-# folder instead of calling `docker compose` directly — they check Docker is
+# Runs BOTH the Flutter dashboard (frontend, built and served by nginx) and
+# the EvaraFlow backend (server/) in containers on any machine with Docker
+# installed. Use the run.sh / run.ps1 / run.bat scripts in this same folder
+# instead of calling `docker compose` directly — they check Docker is
 # installed first and tell you how to get it if not.
+#
+# Open http://localhost:8090 once `docker compose up` says both are running —
+# that's the actual dashboard, not just an API.
 #
 # This does NOT remove the need for real secrets: FIREBASE_SERVICE_ACCOUNT_BASE64,
 # the broker credentials, etc. are specific to this project's actual Firebase
 # project and MQTT broker — no container can know those for you. Fill in
 # server/.env (copy server/.env.example if it doesn't exist yet) before
 # running this; the launcher scripts check for that file and tell you if it's
-# missing, rather than starting a backend with no real configuration.
+# missing, rather than starting a backend with no real configuration. The
+# frontend doesn't need its own secrets: lib/firebase_options.dart is
+# committed on purpose (Firebase web config is meant to be public — see its
+# own comment, and firestore.rules for the actual access control).
 #
-# Only the backend is containerized here. The Flutter dashboard is a
-# client app (built separately — see README.md); the Tailscale image-server
-# pipeline additionally needs this container to have real network access to
-# your Tailscale network, which Docker Desktop's default networking does not
-# provide out of the box — see k8s/README.md and README.md's "Docker" section
-# for what that does and doesn't cover.
+# The Tailscale image-server pipeline additionally needs the backend
+# container to have real network access to your Tailscale network, which
+# Docker Desktop's default networking does not provide out of the box — see
+# k8s/README.md and README.md's "Docker" section for what that does and
+# doesn't cover.
+#
+# frontend needs build/web to already exist — run `flutter build web
+# --release` first (the launcher scripts do this for you automatically if
+# Flutter is installed). Deliberately not built inside Docker: that was
+# tried first using a Flutter-SDK base image and abandoned after its ~1.8GB
+# download stalled repeatedly on a real test — see Dockerfile's own comment.
 services:
+  frontend:
+    build:
+      context: .
+    ports:
+      - "8090:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
   backend:
     build:
       context: ./server

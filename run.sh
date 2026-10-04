@@ -79,25 +79,49 @@ if ! grep -q "^FIREBASE_SERVICE_ACCOUNT_BASE64=.\+" server/.env; then
 fi
 echo -e "${GREEN}✓${NC} server/.env looks filled in"
 
-# ---- 5. Build and start ----
+# ---- 5. Build the Flutter web app (locally, not inside Docker) ----
+# Tried building this inside Docker first, from a Flutter-SDK base image --
+# abandoned after its ~1.8GB download stalled repeatedly on a real test.
+# Building locally is fast (a couple minutes) since it reuses whatever
+# Flutter/Dart tooling and package cache are already on this machine; only
+# the result (build/web, plain static files) gets containerized.
+if ! command -v flutter >/dev/null 2>&1; then
+  echo -e "${RED}Flutter isn't installed${NC} -- it's needed to build the dashboard frontend."
+  echo "Install it: https://docs.flutter.dev/get-started/install"
+  echo "(The backend alone doesn't need this -- only the dashboard UI does.)"
+  exit 1
+fi
+echo -e "${GREEN}✓${NC} Flutter is installed"
 echo ""
-echo "Building and starting the backend..."
+echo "Building the dashboard (flutter build web)... takes a couple minutes."
+flutter build web --release
+
+# ---- 6. Build and start the containers ----
+echo ""
+echo "Starting containers..."
 docker compose up --build -d
 
-# docker compose up -d can report success while the container itself exits
+# docker compose up -d can report success while a container itself exits
 # immediately after (e.g. a port conflict discovered only at container-start
-# time) -- confirmed real during testing. Actually check the container is
+# time) -- confirmed real during testing. Actually check both containers are
 # up, not just that the CLI command returned.
 sleep 2
-state="$(docker compose ps --format json backend 2>/dev/null | grep -o '"State":"[^"]*"' | cut -d'"' -f4)"
-if [ "$state" != "running" ]; then
+failed=""
+for svc in backend frontend; do
+  state="$(docker compose ps --format json "$svc" 2>/dev/null | grep -o '"State":"[^"]*"' | cut -d'"' -f4)"
+  if [ "$state" != "running" ]; then
+    failed="$failed $svc"
+  fi
+done
+if [ -n "$failed" ]; then
   echo ""
-  echo -e "${RED}The container did not stay running.${NC} Check what happened:"
+  echo -e "${RED}These containers did not stay running:${NC}$failed. Check what happened:"
   echo "  docker compose logs"
   exit 1
 fi
 
 echo ""
-echo -e "${GREEN}Running.${NC} Health check: http://localhost:8081/health"
+echo -e "${GREEN}Running.${NC} Open the dashboard: http://localhost:8090"
+echo "Backend health check:        http://localhost:8081/health"
 echo "View logs:   docker compose logs -f"
 echo "Stop it:     docker compose down"

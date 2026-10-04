@@ -1,0 +1,8 @@
+# Only build/web is actually copied into the frontend image (see
+# Dockerfile) -- everything else is excluded so Docker doesn't have to
+# read/hash this whole repo (including server/node_modules,
+# functions/node_modules, .git, and every native platform folder) just to
+# build a tiny nginx image.
+*
+!build/web
+!build/web/**

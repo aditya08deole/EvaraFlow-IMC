@@ -69,30 +69,59 @@ if ($envContent -notmatch "FIREBASE_SERVICE_ACCOUNT_BASE64=\S") {
 }
 Write-Host "OK: server\.env looks filled in" -ForegroundColor Green
 
-# ---- 5. Build and start ----
+# ---- 5. Build the Flutter web app (locally, not inside Docker) ----
+# Tried building this inside Docker first, from a Flutter-SDK base image --
+# abandoned after its ~1.8GB download stalled repeatedly on a real test.
+# Building locally is fast (a couple minutes) since it reuses whatever
+# Flutter/Dart tooling and package cache are already on this machine; only
+# the result (build/web, plain static files) gets containerized.
+$flutterCmd = Get-Command flutter -ErrorAction SilentlyContinue
+if (-not $flutterCmd) {
+    Write-Host "Flutter isn't installed -- it's needed to build the dashboard frontend." -ForegroundColor Red
+    Write-Host "Install it: https://docs.flutter.dev/get-started/install"
+    Write-Host "(The backend alone doesn't need this -- only the dashboard UI does.)"
+    exit 1
+}
+Write-Host "OK: Flutter is installed" -ForegroundColor Green
 Write-Host ""
-Write-Host "Building and starting the backend..."
-docker compose up --build -d
+Write-Host "Building the dashboard (flutter build web)... takes a couple minutes."
+flutter build web --release
 if ($LASTEXITCODE -ne 0) {
-    Write-Host ""
-    Write-Host "Failed to start -- see the error above (a common one: port 8081 is already used by something else on this machine)." -ForegroundColor Red
+    Write-Host "flutter build web failed -- see the error above." -ForegroundColor Red
     exit 1
 }
 
-# docker compose up -d can report success while the container itself exits
+# ---- 6. Build and start the containers ----
+Write-Host ""
+Write-Host "Starting containers..."
+docker compose up --build -d
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Failed to start -- see the error above (a common one: port 8081 or 8090 is already used by something else on this machine)." -ForegroundColor Red
+    exit 1
+}
+
+# docker compose up -d can report success while a container itself exits
 # immediately after (e.g. a port conflict discovered only at container-start
-# time) -- confirmed real during testing. Actually check the container is
+# time) -- confirmed real during testing. Actually check both containers are
 # up, not just that the CLI command returned.
 Start-Sleep -Seconds 2
-$state = docker compose ps --format json backend 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
-if (-not $state -or $state.State -ne "running") {
+$failed = @()
+foreach ($svc in @("backend", "frontend")) {
+    $state = docker compose ps --format json $svc 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if (-not $state -or $state.State -ne "running") {
+        $failed += $svc
+    }
+}
+if ($failed.Count -gt 0) {
     Write-Host ""
-    Write-Host "The container did not stay running. Check what happened:" -ForegroundColor Red
+    Write-Host "These containers did not stay running: $($failed -join ', '). Check what happened:" -ForegroundColor Red
     Write-Host "  docker compose logs"
     exit 1
 }
 
 Write-Host ""
-Write-Host "Running. Health check: http://localhost:8081/health" -ForegroundColor Green
+Write-Host "Running. Open the dashboard: http://localhost:8090" -ForegroundColor Green
+Write-Host "Backend health check:        http://localhost:8081/health"
 Write-Host "View logs:   docker compose logs -f"
 Write-Host "Stop it:     docker compose down"
