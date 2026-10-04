@@ -195,7 +195,7 @@ class _MainLayoutState extends State<MainLayout> {
                                     style: TextStyle(color: Color(0xFF0F172A)),
                                   ),
                                   TextSpan(
-                                    text: 'Flow',
+                                    text: 'Tech',
                                     style: TextStyle(color: Color(0xFF007AFF)),
                                   ),
                                 ],

@@ -247,7 +247,7 @@ class DeviceProvider with ChangeNotifier {
       },
       onError: (e) {
         if (_selectedDeviceId != deviceId) return;
-        _imagesError = 'Unable to retrieve Google Drive images.';
+        _imagesError = 'Unable to retrieve device images.';
         _isImagesLoading = false;
         notifyListeners();
       },

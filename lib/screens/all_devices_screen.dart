@@ -153,7 +153,7 @@ class _AllDevicesScreenState extends State<AllDevicesScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'All EvaraFlow Devices',
+                    'All EvaraTech Devices',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,

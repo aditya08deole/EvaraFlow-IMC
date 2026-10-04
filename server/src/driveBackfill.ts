@@ -33,7 +33,10 @@ export interface DriveFile {
   name: string;
 }
 
-async function getDriveAccessToken(): Promise<string> {
+// Exported for routes/driveImageProxy.ts, which needs the exact same
+// authenticated access — fetching a file's actual bytes via the Drive API
+// is a different call than listing a folder, but needs the same token.
+export async function getDriveAccessToken(): Promise<string> {
   const auth = new GoogleAuth({
     credentials: serviceAccount as object,
     scopes: ["https://www.googleapis.com/auth/drive.readonly"],

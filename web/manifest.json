@@ -1,11 +1,11 @@
 {
-    "name": "evara_flow_dash",
-    "short_name": "evara_flow_dash",
+    "name": "EvaraTech Dashboard",
+    "short_name": "EvaraTech",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "EvaraTech Dashboard",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

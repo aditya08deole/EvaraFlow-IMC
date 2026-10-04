@@ -9,6 +9,7 @@ import { ingestTelemetryHandler } from "./routes/ingestTelemetry";
 import { ingestDriveImageHandler } from "./routes/ingestDriveImage";
 import { ingestTailscaleImageHandler } from "./routes/ingestTailscaleImage";
 import { tailscaleImageProxyHandler } from "./routes/tailscaleImageProxy";
+import { driveImageProxyHandler } from "./routes/driveImageProxy";
 import { backfillDriveImagesHandler } from "./routes/backfillDriveImages";
 import { requireAdmin } from "./firebaseAuth";
 import { startMqttBridge } from "./mqttBridge";
@@ -30,6 +31,7 @@ app.post("/ingest/tailscale-image", ingestTailscaleImageHandler);
 // Called by browsers loading the dashboard gallery, not a webhook — see
 // tailscaleImageProxy.ts for why this needs no auth of its own.
 app.get("/tailscale-images/:nodeId/:filename", tailscaleImageProxyHandler);
+app.get("/drive-images/:fileId", driveImageProxyHandler);
 
 // Everything above is called by devices/webhooks, never a browser, so it
 // never needed CORS. The admin routes below are called directly from the

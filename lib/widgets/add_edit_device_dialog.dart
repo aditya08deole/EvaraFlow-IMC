@@ -142,7 +142,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
       if (driveFolderId == null) {
         setState(
           () => _driveFolderError =
-              "Doesn't look like a Drive folder link or id — paste the folder's share link, or just its id.",
+              "Doesn't look like a folder link or id — paste the folder's share link, or just its id.",
         );
         return;
       }
@@ -214,8 +214,8 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                   children: [
                     Text(
                       isEditing
-                          ? 'Edit EvaraFlow Device'
-                          : 'Add New EvaraFlow Device',
+                          ? 'Edit EvaraTech Device'
+                          : 'Add New EvaraTech Device',
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -305,7 +305,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                               _identityRow('MQTT username', _mqttUsername),
                               _identityRow('MQTT topic', _mqttTopic),
                               _identityRow(
-                                'Drive filename prefix',
+                                'Photo filename prefix',
                                 _driveMatchKey,
                                 isLast: true,
                               ),
@@ -398,14 +398,14 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                                   DropdownMenuItem(
                                     value: ImageSource.tailscale,
                                     child: Text(
-                                      'Tailscale (live, via Pi/laptop image server)',
+                                      'Live Camera Feed (on-site device)',
                                       style: TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   DropdownMenuItem(
                                     value: ImageSource.drive,
                                     child: Text(
-                                      'Google Drive',
+                                      'Cloud Photo Folder',
                                       style: TextStyle(fontSize: 12),
                                     ),
                                   ),
@@ -419,15 +419,15 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                               if (_imageSource == ImageSource.tailscale) ...[
                                 const SizedBox(height: 8),
                                 const Text(
-                                  'No setup needed — the backend polls the Tailscale image server every 5 minutes and matches photos by this device\'s ID automatically.',
+                                  'No setup needed — new photos from the on-site camera are picked up automatically every few minutes.',
                                   style: TextStyle(
                                     fontSize: 10.5,
                                     color: AppColors.textMuted,
                                   ),
                                 ),
                               ],
-                              // Google Drive folder — optional. Paste a
-                              // share link or a bare folder id; on save this
+                              // Cloud photo folder — optional. Paste a share
+                              // link or a bare folder id; on save this
                               // triggers a one-time backfill of whatever's
                               // already in that folder
                               // (server/src/driveBackfill.ts) so
@@ -456,7 +456,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
                                 const Padding(
                                   padding: EdgeInsets.only(top: 4),
                                   child: Text(
-                                    'If this device already has photos sitting in Drive, pasting its folder here indexes them into the gallery in the background — can take a few minutes for a large folder.',
+                                    'If this device already has photos sitting in that folder, pasting its link here indexes them into the gallery in the background — can take a few minutes for a large folder.',
                                     style: TextStyle(
                                       fontSize: 10.5,
                                       color: AppColors.textMuted,

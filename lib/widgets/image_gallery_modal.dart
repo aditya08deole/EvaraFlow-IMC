@@ -108,7 +108,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                             ),
                           ),
                           child: Text(
-                            '${images.length} Photos (Google Drive)',
+                            '${images.length} Photos',
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppColors.driveBlue,
@@ -165,7 +165,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Ensure files in Google Drive follow key pattern: ${widget.device.driveMatchKey}',
+              'Ensure photo files follow the naming pattern: ${widget.device.driveMatchKey}',
               style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
             ),
           ],
@@ -216,7 +216,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                               color: AppColors.textMuted,
                               size: 18,
                             ),
-                            tooltip: 'Image unavailable — remove if deleted from Drive',
+                            tooltip: 'Image unavailable — remove if the original photo was deleted',
                             onPressed: () => widget.onImageBroken(img),
                           ),
                         ),
@@ -319,7 +319,7 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
                             ),
                             TextButton(
                               onPressed: () => widget.onImageBroken(img),
-                              child: const Text('Remove if deleted from Drive'),
+                              child: const Text('Remove if the original photo was deleted'),
                             ),
                           ],
                         ),
@@ -334,38 +334,23 @@ class _ImageGalleryModalState extends State<ImageGalleryModal> {
             Container(
               padding: const EdgeInsets.all(14),
               color: AppColors.surfaceSecondary,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'File: ${img.fileName}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Captured: ${img.capturedAt != null ? dateFormat.format(img.capturedAt!) : "N/A"}  |  Synced: ${dateFormat.format(img.receivedAt)}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'File: ${img.fileName}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.open_in_new, size: 14),
-                    label: const Text('Open in Drive'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.driveBlue,
-                      side: const BorderSide(color: AppColors.driveBlue),
-                      textStyle: const TextStyle(fontSize: 12),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Captured: ${img.capturedAt != null ? dateFormat.format(img.capturedAt!) : "N/A"}  |  Synced: ${dateFormat.format(img.receivedAt)}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
                     ),
                   ),
                 ],

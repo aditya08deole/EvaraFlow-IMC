@@ -105,7 +105,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                           ),
                           SizedBox(height: 4),
                           Text(
-                            'All EvaraFlow devices operating normally.',
+                            'All EvaraTech devices operating normally.',
                             style: TextStyle(
                               fontSize: 12,
                               color: AppColors.textMuted,

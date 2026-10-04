@@ -12,7 +12,7 @@ class EvaraFlowApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => DeviceProvider(),
       child: MaterialApp(
-        title: 'EvaraFlow Dashboard',
+        title: 'EvaraTech Dashboard',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         home: const AuthGate(),

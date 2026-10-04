@@ -93,10 +93,10 @@ test("files an image from an unknown device as Unassigned, not a dead letter", a
   };
   assert.equal(fields.orgId, null);
   assert.equal(fields.deviceId, null);
-  assert.equal(fields.storageUrl, "https://lh3.googleusercontent.com/d/unassigned-1=w1600");
+  assert.equal(fields.storageUrl, "http://test-backend.example.com/drive-images/unassigned-1");
 });
 
-test("indexes a valid image for a registered device with a direct Drive URL", async (t) => {
+test("indexes a valid image for a registered device with this backend's own proxy URL", async (t) => {
   t.mock.method(db, "imageExists", async () => false);
   t.mock.method(db, "findDeviceByNodeId", async (nodeId: string) =>
     nodeId === DEVICE.deviceId ? DEVICE : null
@@ -123,8 +123,8 @@ test("indexes a valid image for a registered device with a direct Drive URL", as
   assert.equal(fields.orgId, "org-001");
   assert.equal(fields.deviceId, "EVT-EF-002");
   assert.equal(fields.capturedAt, "2026-10-02T15:30:00Z");
-  assert.equal(fields.storageUrl, "https://lh3.googleusercontent.com/d/real-1=w1600");
-  assert.equal(fields.thumbUrl, "https://lh3.googleusercontent.com/d/real-1=w400");
+  assert.equal(fields.storageUrl, "http://test-backend.example.com/drive-images/real-1");
+  assert.equal(fields.thumbUrl, "http://test-backend.example.com/drive-images/real-1");
 });
 
 test("returns 500 (not a crash) when the Firestore insert throws", async (t) => {

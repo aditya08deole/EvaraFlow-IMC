@@ -117,16 +117,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Live status of the MQTT telemetry pipeline and both image pipelines (Google Drive, Tailscale).',
+            'Live status of device connectivity and photo syncing.',
             style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 20),
 
-          // Pipeline A, B, C Integration Status Cards
+          // Integration Status Cards
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pipeline A Card: EMQX MQTT
+              // Card: Live Telemetry
               Expanded(
                 child: SurfaceCard(
                   padding: const EdgeInsets.all(16),
@@ -136,15 +136,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _cardHeader(
                         Icons.hub_outlined,
                         AppColors.cyanAccent,
-                        'Pipeline A: MQTT',
+                        'Live Telemetry',
                       ),
                       const SizedBox(height: 12),
-                      _buildSettingItem('Broker', 'mqtt.evaratech.com'),
-                      _buildSettingItem('Transport', 'wss://:443 (TLS)'),
-                      _buildSettingItem(
-                        'Topic Filter',
-                        'evaratech/v1/+/telemetry',
-                      ),
                       _buildSettingItem(
                         'Last Message Received',
                         selectedDevice?.lastSeenAt != null
@@ -153,7 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       _buildSettingItem(
                         'Browser Credential Exposure',
-                        'Zero (TR-2 — this app never connects to MQTT)',
+                        'Zero — this app never connects directly to a device',
                       ),
                     ],
                   ),
@@ -161,7 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(width: 20),
 
-              // Pipeline B Card: Google Drive
+              // Card: Cloud Photo Folder
               Expanded(
                 child: SurfaceCard(
                   padding: const EdgeInsets.all(16),
@@ -171,17 +165,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _cardHeader(
                         Icons.cloud_sync_outlined,
                         AppColors.driveBlue,
-                        'Pipeline B: Google Drive',
+                        'Cloud Photo Folder',
                       ),
                       const SizedBox(height: 12),
-                      _buildSettingItem('Delivery', 'Push (Apps Script → webhook)'),
                       _buildSettingItem(
                         'Folder Scope',
                         'Per-device (Add/Edit Device dialog)',
-                      ),
-                      _buildSettingItem(
-                        'Filename Contract',
-                        '{node_id}_{YYYYMMDD}_{HHMMSS}.jpg',
                       ),
                       _buildSettingItem(
                         'Last Successful Sync',
@@ -195,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(width: 20),
 
-              // Pipeline C Card: Tailscale
+              // Card: Live Camera Feed
               Expanded(
                 child: SurfaceCard(
                   padding: const EdgeInsets.all(16),
@@ -205,18 +194,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _cardHeader(
                         Icons.lan_outlined,
                         AppColors.liveTeal,
-                        'Pipeline C: Tailscale',
+                        'Live Camera Feed',
                       ),
                       const SizedBox(height: 12),
-                      _buildSettingItem('Delivery', 'Pull, every 5 minutes'),
-                      _buildSettingItem(
-                        'Viewing',
-                        'Live proxy per view (no cached copy)',
-                      ),
-                      _buildSettingItem(
-                        'Why no cache',
-                        'Avoids Firebase Storage\'s paid plan',
-                      ),
+                      _buildSettingItem('Checked', 'Every 5 minutes'),
                       _buildSettingItem(
                         'Last Successful Sync',
                         latestImage != null
@@ -250,7 +231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Invalid MQTT payloads or unparseable Drive/Tailscale files are rejected here for inspection without repair.',
+                      'Invalid telemetry or photo files are rejected here for inspection without repair.',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppColors.textSecondary,

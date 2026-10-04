@@ -102,7 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             SizedBox(height: 4),
             Text(
-              'Contact your administrator to register an EvaraFlow device.',
+              'Contact your administrator to register an EvaraTech device.',
               style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
           ],
