@@ -15,6 +15,7 @@ import { requireAdmin } from "./firebaseAuth";
 import { startMqttBridge } from "./mqttBridge";
 import { sweepOfflineDevices } from "./status";
 import { pollTailscaleImages } from "./tailscalePoll";
+import { pollDriveFolders } from "./drivePoll";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -91,4 +92,21 @@ setInterval(() => {
 // first check.
 pollTailscaleImages().catch((err) => {
   console.error("pollTailscaleImages failed", err);
+});
+
+// Drive's counterpart to the Tailscale poll above (see drivePoll.ts for
+// why this didn't exist before, and why checking every 2.5 minutes is
+// safe despite a large folder -- the expensive per-file Firestore check
+// only runs when the cheap per-tick file count has actually grown).
+// Unconditional, unlike the two optional pollers above (MQTT_HOST /
+// TAILSCALE_IMAGE_BASE_URL-gated) — it just no-ops cheaply (one empty
+// collectionGroup query) when no device has imageSource "drive" with a
+// driveFolderId set.
+setInterval(() => {
+  pollDriveFolders().catch((err) => {
+    console.error("pollDriveFolders failed", err);
+  });
+}, 2.5 * 60_000);
+pollDriveFolders().catch((err) => {
+  console.error("pollDriveFolders failed", err);
 });

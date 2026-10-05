@@ -26,6 +26,16 @@ class Device {
   final bool isActive;
   final String? firmwareVersion;
 
+  /// Drive folder id this device's photos live in — persisted so
+  /// server/src/drivePoll.ts can re-check the folder for new photos on a
+  /// timer. Previously this only ever existed transiently inside the
+  /// Add/Edit Device dialog's form state (used once to trigger a single
+  /// backfill call, then discarded), so nothing could repeat that check
+  /// later — a new photo dropped into the folder just sat there
+  /// unindexed until someone manually reopened the dialog and re-pasted
+  /// the same folder link (EVARAFLOW_GROUND_TRUTH.md D-034).
+  final String? driveFolderId;
+
   const Device({
     required this.deviceId,
     required this.orgId,
@@ -40,6 +50,7 @@ class Device {
     this.lastSeenAt,
     this.isActive = true,
     this.firmwareVersion,
+    this.driveFolderId,
   });
 
   /// Derived from [deviceId] per the confirmed real-firmware convention
@@ -72,6 +83,7 @@ class Device {
     DateTime? lastSeenAt,
     bool? isActive,
     String? firmwareVersion,
+    String? driveFolderId,
   }) {
     return Device(
       deviceId: deviceId,
@@ -88,6 +100,7 @@ class Device {
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       isActive: isActive ?? this.isActive,
       firmwareVersion: firmwareVersion ?? this.firmwareVersion,
+      driveFolderId: driveFolderId ?? this.driveFolderId,
     );
   }
 

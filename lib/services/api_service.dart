@@ -101,6 +101,7 @@ class ApiService {
     'consumptionMethod': device.consumptionMethod.name,
     'imageSource': device.imageSource.name,
     'isActive': device.isActive,
+    'driveFolderId': device.driveFolderId,
   };
 
   // Writes organizations/{orgId}/devices/{deviceId} AND deviceIndex/{deviceId}
@@ -164,6 +165,7 @@ class ApiService {
       lastSeenAt: (data['lastSeenAt'] as Timestamp?)?.toDate(),
       isActive: data['isActive'] as bool? ?? true,
       firmwareVersion: data['firmwareVersion'] as String?,
+      driveFolderId: data['driveFolderId'] as String?,
     );
 
     // server/src/status.ts (TR-12) can only ever prove a device *online* —

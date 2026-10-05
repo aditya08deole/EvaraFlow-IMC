@@ -92,7 +92,7 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
       text: d?.expectedIntervalSeconds.toString() ?? '300',
     );
     _mqttPasswordController = TextEditingController();
-    _driveFolderController = TextEditingController();
+    _driveFolderController = TextEditingController(text: d?.driveFolderId ?? '');
     if (d != null) {
       _consumptionMethod = d.consumptionMethod;
       _imageSource = d.imageSource;
@@ -168,6 +168,11 @@ class _AddEditDeviceDialogState extends State<AddEditDeviceDialog> {
         status: isEditing ? widget.initialDevice!.status : DeviceStatus.noData,
         lastSeenAt: widget.initialDevice?.lastSeenAt,
         firmwareVersion: widget.initialDevice?.firmwareVersion,
+        // Persisted (not just passed to the one-time backfill trigger
+        // below) so server/src/drivePoll.ts can keep re-checking this
+        // folder for new photos on its own, instead of new photos only
+        // ever being picked up the one time this dialog is submitted.
+        driveFolderId: driveFolderId,
       );
 
       // The MQTT password is write-only by design (TR-2 / the backend plan's
