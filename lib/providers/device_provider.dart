@@ -119,7 +119,26 @@ class DeviceProvider with ChangeNotifier {
   DeviceProvider({ApiService? apiService})
     : _apiService = apiService ?? ApiService() {
     init();
-    _tickTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _tickTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (_selectedDeviceId != null) {
+        try {
+          final live = await _apiService.fetchLiveTelemetry(_selectedDeviceId!);
+          if (live != null) {
+            final isNew = _latestReading == null ||
+                _latestReading!.totalL != live.totalL ||
+                _latestReading!.flowLpm != live.flowLpm ||
+                live.receivedAt.isAfter(_latestReading!.receivedAt);
+            if (isNew) {
+              _latestReading = live;
+              if (_historicalReadings.isEmpty ||
+                  _historicalReadings.last.totalL != live.totalL ||
+                  _historicalReadings.last.flowLpm != live.flowLpm) {
+                _historicalReadings.add(live);
+              }
+            }
+          }
+        } catch (_) {}
+      }
       notifyListeners();
     });
   }
@@ -203,6 +222,16 @@ class DeviceProvider with ChangeNotifier {
     _deviceSub?.cancel();
     _latestReadingSub?.cancel();
     _imagesSub?.cancel();
+
+    _apiService.fetchLiveTelemetry(deviceId).then((live) {
+      if (live != null && _selectedDeviceId == deviceId) {
+        _latestReading = live;
+        if (_historicalReadings.isEmpty) {
+          _historicalReadings.add(live);
+        }
+        notifyListeners();
+      }
+    }).catchError((_) {});
 
     _deviceSub = _apiService.watchDevice(deviceId).listen(
       (device) {

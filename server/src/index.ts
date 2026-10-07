@@ -34,6 +34,28 @@ app.post("/ingest/tailscale-image", ingestTailscaleImageHandler);
 app.get("/tailscale-images/:nodeId/:filename", tailscaleImageProxyHandler);
 app.get("/drive-images/:fileId", driveImageProxyHandler);
 
+import { LATEST_READINGS } from "./db";
+app.get("/telemetry/latest/:deviceId", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  const deviceId = req.params.deviceId;
+  const canonical = deviceId.replace(/_/g, "-");
+  const reading = LATEST_READINGS.get(canonical) || LATEST_READINGS.get(deviceId);
+  if (!reading) {
+    res.status(404).json({ error: "No telemetry received yet" });
+    return;
+  }
+  res.json(reading);
+});
+
+app.get("/telemetry/latest", (_req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  const all: Record<string, unknown> = {};
+  LATEST_READINGS.forEach((val, key) => {
+    all[key] = val;
+  });
+  res.json(all);
+});
+
 // Everything above is called by devices/webhooks, never a browser, so it
 // never needed CORS. The admin routes below are called directly from the
 // Flutter app running in a browser (localhost:5050 in dev), which the

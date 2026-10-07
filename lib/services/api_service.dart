@@ -113,6 +113,9 @@ class ApiService {
       );
     }
 
+    // Keep only canonical EVT-EF-006 and exclude duplicate EVT_EF_006 per user request
+    list = list.where((d) => d.deviceId != 'EVT_EF_006').toList();
+
     if (search.isNotEmpty) {
       final query = search.toLowerCase();
       list = list
@@ -586,5 +589,29 @@ class ApiService {
         'Backfill request failed: HTTP ${res.statusCode} ${res.body}',
       );
     }
+  }
+
+  /// Live EMQX telemetry direct from the backend ingestion bridge (fast & bypasses Firestore latency/quota)
+  Future<Reading?> fetchLiveTelemetry(String deviceId) async {
+    try {
+      final canonical = deviceId.replaceAll('_', '-');
+      final url = Uri.parse('$backendBaseUrl/telemetry/latest/$canonical');
+      final res = await http.get(url).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final flow = (data['flowLpm'] as num?)?.toDouble() ?? 0.0;
+        final total = (data['totalL'] as num?)?.toDouble();
+        final tsStr = data['timestamp'] as String?;
+        final ts = tsStr != null ? DateTime.tryParse(tsStr) ?? DateTime.now() : DateTime.now();
+        return Reading(
+          deviceId: canonical,
+          deviceTs: ts,
+          receivedAt: ts,
+          flowLpm: flow,
+          totalL: total,
+        );
+      }
+    } catch (_) {}
+    return null;
   }
 }
