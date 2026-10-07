@@ -37,11 +37,32 @@ export interface DeviceRef {
 
 const db = () => getFirestore();
 
+// In-memory cache to eliminate repetitive Firestore reads on high-frequency MQTT telemetry
+const DEVICE_CACHE = new Map<string, DeviceRef>();
+
 /** Looks up which org a device belongs to, then loads the device doc. */
 export async function findDeviceByNodeId(
   nodeId: string
 ): Promise<DeviceRef | null> {
-  const indexDoc = await db().collection("deviceIndex").doc(nodeId).get();
+  const cached = DEVICE_CACHE.get(nodeId);
+  if (cached) return cached;
+
+  // Try normalized variants (EVT_EF_006 <-> EVT-EF-006)
+  const altId = nodeId.includes("_")
+    ? nodeId.replace(/_/g, "-")
+    : nodeId.replace(/-/g, "_");
+  const altCached = DEVICE_CACHE.get(altId);
+  if (altCached) {
+    DEVICE_CACHE.set(nodeId, altCached);
+    return altCached;
+  }
+
+  let indexDoc = await db().collection("deviceIndex").doc(nodeId).get();
+  let resolvedId = nodeId;
+  if (!indexDoc.exists && altId !== nodeId) {
+    indexDoc = await db().collection("deviceIndex").doc(altId).get();
+    if (indexDoc.exists) resolvedId = altId;
+  }
   if (!indexDoc.exists) return null;
 
   const orgId = indexDoc.data()?.orgId as string | undefined;
@@ -51,14 +72,14 @@ export async function findDeviceByNodeId(
     .collection("organizations")
     .doc(orgId)
     .collection("devices")
-    .doc(nodeId)
+    .doc(resolvedId)
     .get();
   if (!deviceDoc.exists) return null;
 
   const data = deviceDoc.data();
-  return {
+  const ref: DeviceRef = {
     orgId,
-    deviceId: nodeId,
+    deviceId: resolvedId,
     expectedIntervalSeconds:
       (data?.expectedIntervalSeconds as number | undefined) ?? 300,
     lastFlowLpm: (data?.lastFlowLpm as number | undefined) ?? null,
@@ -66,6 +87,10 @@ export async function findDeviceByNodeId(
     lastSeenAt:
       (data?.lastSeenAt as { toDate?: () => Date } | undefined)?.toDate?.() ?? null,
   };
+
+  DEVICE_CACHE.set(nodeId, ref);
+  DEVICE_CACHE.set(resolvedId, ref);
+  return ref;
 }
 
 /**
@@ -122,9 +147,29 @@ export async function insertReading(
     const deviceUpdate: Record<string, unknown> = {
       lastSeenAt: now,
     };
-    if (fields.flowLpm !== null) deviceUpdate.lastFlowLpm = fields.flowLpm;
-    if (fields.totalL !== null) deviceUpdate.lastTotalL = fields.totalL;
+    if (fields.flowLpm !== null) {
+      deviceUpdate.lastFlowLpm = fields.flowLpm;
+      device.lastFlowLpm = fields.flowLpm;
+    }
+    if (fields.totalL !== null) {
+      deviceUpdate.lastTotalL = fields.totalL;
+      device.lastTotalL = fields.totalL;
+    }
+    device.lastSeenAt = new Date();
     tx.update(deviceRef, deviceUpdate);
+
+    // Keep alias doc (e.g. EVT_EF_006 <-> EVT-EF-006) synchronized
+    const altId = device.deviceId.includes("_")
+      ? device.deviceId.replace(/_/g, "-")
+      : device.deviceId.replace(/-/g, "_");
+    if (altId !== device.deviceId) {
+      const altRef = db()
+        .collection("organizations")
+        .doc(device.orgId)
+        .collection("devices")
+        .doc(altId);
+      tx.set(altRef, deviceUpdate, { merge: true });
+    }
   });
 }
 

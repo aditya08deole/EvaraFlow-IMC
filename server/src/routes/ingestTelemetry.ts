@@ -114,7 +114,10 @@ export async function processTelemetryMessage(
     return;
   }
 
-  const device = await findDeviceByNodeId(nodeId);
+  let device = await findDeviceByNodeId(nodeId);
+  if (!device && typeof parsed.node_id === "string") {
+    device = await findDeviceByNodeId(parsed.node_id);
+  }
   if (!device) {
     await deadLetter("mqtt", parsed, `unknown device ${nodeId}`);
     return;
