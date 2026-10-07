@@ -26,8 +26,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
     final filtered = alerts.where((a) {
       if (_filter == 'new' && a.status != AlertStatus.newAlert) return false;
-      if (_filter == 'ack' && a.status != AlertStatus.acknowledged)
+      if (_filter == 'ack' && a.status != AlertStatus.acknowledged) {
         return false;
+      }
       return true;
     }).toList();
 

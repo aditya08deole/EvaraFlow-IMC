@@ -138,7 +138,7 @@ class _MainLayoutState extends State<MainLayout> {
                 ),
                 child: Row(
                   children: [
-                    // Left: Brand Emblem (EvaraFlow)
+                    // Left: Brand Emblem (EvaraTech)
                     InkWell(
                       onTap: () => _onSelectTab(0),
                       borderRadius: BorderRadius.circular(28),
@@ -150,36 +150,11 @@ class _MainLayoutState extends State<MainLayout> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFF007AFF),
-                                    Color(0xFF34C759),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.95),
-                                  width: 1.8,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(
-                                      0xFF007AFF,
-                                    ).withValues(alpha: 0.45),
-                                    blurRadius: 12,
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.water_drop_rounded,
-                                color: Colors.white,
-                                size: 21,
-                              ),
+                            Image.asset(
+                              'assets/images/evaratech_logo.png',
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.contain,
                             ),
                             const SizedBox(width: 12),
                             RichText(

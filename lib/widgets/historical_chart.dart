@@ -233,8 +233,9 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
                           getTitlesWidget: (value, meta) {
                             if (!value.isFinite) return const SizedBox();
                             final idx = value.toInt();
-                            if (idx < 0 || idx >= widget.readings.length)
+                            if (idx < 0 || idx >= widget.readings.length) {
                               return const SizedBox();
+                            }
                             final dt = widget.readings[idx].deviceTs;
                             final fmt = widget.selectedRange == 'Today'
                                 ? DateFormat('HH:mm')
@@ -358,8 +359,9 @@ class _HistoricalChartCardState extends State<HistoricalChartCard> {
                         getTooltipItems: (touchedSpots) {
                           return touchedSpots.map((spot) {
                             final idx = spot.spotIndex;
-                            if (idx < 0 || idx >= widget.readings.length)
+                            if (idx < 0 || idx >= widget.readings.length) {
                               return null;
+                            }
                             final r = widget.readings[idx];
                             final timeStr = DateFormat(
                               'HH:mm:ss',

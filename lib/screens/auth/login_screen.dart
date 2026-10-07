@@ -229,31 +229,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildBrandMark() {
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF007AFF), Color(0xFF34C759)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.95),
-              width: 1.8,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF007AFF).withValues(alpha: 0.45),
-                blurRadius: 16,
-              ),
-            ],
-          ),
-          child: const Icon(
-            Icons.water_drop_rounded,
-            color: Colors.white,
-            size: 28,
-          ),
+        Image.asset(
+          'assets/images/evaratech_logo.png',
+          width: 64,
+          height: 64,
+          fit: BoxFit.contain,
         ),
         const SizedBox(height: 14),
         RichText(
@@ -265,7 +245,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             children: [
               TextSpan(text: 'Evara', style: TextStyle(color: Color(0xFF0F172A))),
-              TextSpan(text: 'Flow', style: TextStyle(color: Color(0xFF007AFF))),
+              TextSpan(text: 'Tech', style: TextStyle(color: Color(0xFF007AFF))),
             ],
           ),
         ),
