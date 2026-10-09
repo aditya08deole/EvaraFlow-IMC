@@ -54,20 +54,6 @@
 # workflow's own comment for the one secret it needs and the free-tier
 # monthly-hours caveat.
 
-FROM ghcr.io/cirruslabs/flutter:stable AS frontend-build
-WORKDIR /app
-COPY pubspec.yaml pubspec.lock* ./
-RUN flutter pub get
-COPY lib ./lib
-COPY web ./web
-COPY assets ./assets
-# Empty BACKEND_BASE_URL makes lib/config.dart's admin-backfill call use a
-# relative URL, resolved by the browser against whatever origin this page
-# was loaded from -- which is always this same single service, so it just
-# works without knowing Render's domain at build time. See config.dart's
-# own comment.
-RUN flutter build web --release --dart-define=BACKEND_BASE_URL=
-
 FROM node:20-alpine AS backend-build
 WORKDIR /app
 COPY server/package*.json ./
@@ -86,14 +72,10 @@ RUN apk add --no-cache nodejs
 WORKDIR /app
 COPY --from=backend-deps /app/node_modules ./node_modules
 COPY --from=backend-build /app/dist ./dist
-COPY --from=frontend-build /app/build/web /usr/share/nginx/html
+COPY build/web /usr/share/nginx/html
 COPY nginx.railway.conf.template /etc/nginx/templates/default.conf.template
 COPY railway-start-backend.sh /docker-entrypoint.d/50-start-backend.sh
 RUN chmod +x /docker-entrypoint.d/50-start-backend.sh
 
-# Fallback only -- Render overrides this with its own real PORT at
-# container start. Exists because nginx.railway.conf.template's envsubst
-# can't express a fallback itself (see that file's own comment for the
-# confirmed bug this replaced: `${PORT:-8080}` silently failed to parse).
 ENV PORT=8080
 EXPOSE 8080

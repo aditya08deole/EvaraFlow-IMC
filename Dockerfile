@@ -18,6 +18,29 @@
 # web config is designed to be public and embedded in client bundles — real
 # access control is enforced by Firestore Security Rules. See firestore.rules.
 
+FROM node:20-alpine AS backend-build
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci
+COPY server/tsconfig.json ./
+COPY server/src ./src
+RUN npm run build
+
+FROM node:20-alpine AS backend-deps
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+
 FROM nginx:alpine
+RUN apk add --no-cache nodejs
+WORKDIR /app
+COPY --from=backend-deps /app/node_modules ./node_modules
+COPY --from=backend-build /app/dist ./dist
 COPY build/web /usr/share/nginx/html
-EXPOSE 80
+COPY nginx.railway.conf.template /etc/nginx/templates/default.conf.template
+COPY railway-start-backend.sh /docker-entrypoint.d/50-start-backend.sh
+RUN chmod +x /docker-entrypoint.d/50-start-backend.sh
+
+ENV PORT=8080
+EXPOSE 8080
+
