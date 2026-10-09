@@ -54,16 +54,10 @@ export async function recomputeStatusAndAlerts(
  */
 export async function sweepOfflineDevices(): Promise<void> {
   const db = getFirestore();
-  let snap;
-  try {
-    snap = await db
-      .collectionGroup("devices")
-      .where("status", "==", "online")
-      .get();
-  } catch (err) {
-    // Gracefully ignore Firestore quota limits
-    return;
-  }
+  const snap = await db
+    .collectionGroup("devices")
+    .where("status", "==", "online")
+    .get();
 
   const now = Date.now();
   let flipped = 0;

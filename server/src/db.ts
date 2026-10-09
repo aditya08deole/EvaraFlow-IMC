@@ -166,17 +166,18 @@ export async function findDeviceByNodeId(
     DEVICE_CACHE.set(resolvedId, ref);
     return ref;
   } catch (err) {
-    console.warn(`Firestore read failed in findDeviceByNodeId for ${nodeId}, using fallback:`, err);
-    const fallbackRef: DeviceRef = {
-      orgId: "org-001",
-      deviceId: altId.includes("-") ? altId : nodeId,
-      expectedIntervalSeconds: 300,
-      lastFlowLpm: null,
-      lastTotalL: null,
-      lastSeenAt: new Date(),
-    };
-    DEVICE_CACHE.set(nodeId, fallbackRef);
-    return fallbackRef;
+    // A Firestore blip here must not be treated as "this device is real" —
+    // TR-5 requires unknown input to dead-letter, never be guessed into
+    // existence. Confirmed real incident: this used to fabricate a
+    // DeviceRef for *any* nodeId on a Firestore error, which let unrelated
+    // MQTT traffic (e.g. a different product line's "evaravalve-*" nodes)
+    // get silently accepted as live EvaraFlow telemetry whenever the free
+    // Firestore tier's quota was hit. A device already confirmed via
+    // KNOWN_DEVICES or the in-memory cache above never reaches this catch
+    // block at all, so returning null here only ever drops traffic from a
+    // nodeId this process has no prior confirmation of.
+    console.warn(`Firestore read failed in findDeviceByNodeId for ${nodeId}:`, err);
+    return null;
   }
 }
 
@@ -256,19 +257,17 @@ export async function insertReading(
       }
       device.lastSeenAt = new Date();
       tx.update(deviceRef, deviceUpdate);
-
-      // Keep alias doc (e.g. EVT_EF_006 <-> EVT-EF-006) synchronized
-      const altId = device.deviceId.includes("_")
-        ? device.deviceId.replace(/_/g, "-")
-        : device.deviceId.replace(/-/g, "_");
-      if (altId !== device.deviceId) {
-        const altRef = db()
-          .collection("organizations")
-          .doc(device.orgId)
-          .collection("devices")
-          .doc(altId);
-        tx.set(altRef, deviceUpdate, { merge: true });
-      }
+      // No separate "alias doc" write here (there used to be one, meant
+      // only for the EVT_EF_006 <-> EVT-EF-006 underscore/dash alias) —
+      // device.deviceId is already canonicalized by findDeviceByNodeId
+      // before insertReading ever sees it (via KNOWN_DEVICES/deviceIndex),
+      // so writing a second doc under the alt spelling just created a
+      // phantom duplicate device (e.g. "EVT_EF_002", "EVT_EF_004") for
+      // every real device on every single reading, since any dash-only id
+      // has a non-equal underscore "alt" form. Confirmed in the live
+      // Firestore data: organizations/org-001/devices had EVT_EF_002 and
+      // EVT_EF_004 docs with no name/location/mqttTopic, showing up in the
+      // device selector as broken-looking duplicates of the real devices.
     });
   } catch (err) {
     console.warn(`Firestore transaction failed in insertReading for ${device.deviceId}:`, err);
